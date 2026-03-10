@@ -1,0 +1,54 @@
+# =============================================================================
+# Atlas RAG System - Python Dependencies
+# =============================================================================
+
+# Web Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# Datenbank
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+alembic==1.14.0
+pgvector==0.3.6
+
+# Authentifizierung
+pyjwt==2.10.1
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+
+# Konfiguration
+pyyaml==6.0.2
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# Dokument-Verarbeitung
+pypdf==5.1.0
+python-docx==1.1.2
+openpyxl==3.1.5
+python-pptx==1.0.2
+beautifulsoup4==4.12.3
+markdown==3.7
+
+# OCR
+pytesseract==0.3.13
+pdf2image==1.17.0
+Pillow==11.1.0
+
+# NLP & Embedding
+tiktoken==0.8.0
+numpy==2.2.1
+
+# HTTP Client (für Ollama API)
+httpx==0.28.1
+aiohttp==3.11.11
+
+# Logging
+python-json-logger==3.2.1
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1
