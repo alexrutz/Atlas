@@ -1,0 +1,191 @@
+"""
+Datei-Parser für verschiedene Dokumentformate.
+
+Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, HTML
+"""
+
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ParsedSection:
+    """Ein Abschnitt aus einem geparsten Dokument."""
+    header: str | None
+    content: str
+    page_number: int | None = None
+
+
+@dataclass
+class ParsedDocument:
+    """Ergebnis des Dokument-Parsings."""
+    text: str                                  # Gesamter extrahierter Text
+    sections: list[ParsedSection] = field(default_factory=list)  # Erkannte Abschnitte
+    page_count: int | None = None              # Seitenanzahl (bei PDFs)
+    metadata: dict = field(default_factory=dict)
+
+
+def parse_document(file_path: str, file_type: str) -> ParsedDocument:
+    """
+    Parst ein Dokument und extrahiert den Text.
+
+    Args:
+        file_path: Pfad zur Datei
+        file_type: Dateityp (z.B. '.pdf', '.docx')
+
+    Returns:
+        ParsedDocument mit extrahiertem Text und Abschnitten
+    """
+    parsers = {
+        ".pdf": _parse_pdf,
+        ".docx": _parse_docx,
+        ".doc": _parse_docx,
+        ".xlsx": _parse_xlsx,
+        ".xls": _parse_xlsx,
+        ".pptx": _parse_pptx,
+        ".txt": _parse_text,
+        ".md": _parse_text,
+        ".csv": _parse_csv,
+        ".html": _parse_html,
+        ".xml": _parse_html,
+        ".json": _parse_text,
+    }
+
+    parser = parsers.get(file_type.lower())
+    if not parser:
+        raise ValueError(f"Nicht unterstütztes Dateiformat: {file_type}")
+
+    return parser(file_path)
+
+
+def _parse_pdf(file_path: str) -> ParsedDocument:
+    """Parst ein PDF-Dokument."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(file_path)
+    sections = []
+    full_text = []
+
+    for i, page in enumerate(reader.pages):
+        text = page.extract_text() or ""
+        if text.strip():
+            sections.append(ParsedSection(
+                header=None,
+                content=text,
+                page_number=i + 1,
+            ))
+            full_text.append(text)
+
+    return ParsedDocument(
+        text="\n\n".join(full_text),
+        sections=sections,
+        page_count=len(reader.pages),
+    )
+
+
+def _parse_docx(file_path: str) -> ParsedDocument:
+    """Parst ein Word-Dokument."""
+    from docx import Document as DocxDocument
+
+    doc = DocxDocument(file_path)
+    sections = []
+    current_section = None
+    current_text = []
+
+    for para in doc.paragraphs:
+        if para.style.name.startswith("Heading"):
+            if current_text:
+                sections.append(ParsedSection(
+                    header=current_section, content="\n".join(current_text),
+                ))
+            current_section = para.text
+            current_text = []
+        else:
+            if para.text.strip():
+                current_text.append(para.text)
+
+    if current_text:
+        sections.append(ParsedSection(header=current_section, content="\n".join(current_text)))
+
+    full_text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    return ParsedDocument(text=full_text, sections=sections)
+
+
+def _parse_xlsx(file_path: str) -> ParsedDocument:
+    """Parst eine Excel-Datei."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(file_path, data_only=True)
+    sections = []
+    full_text = []
+
+    for sheet_name in wb.sheetnames:
+        sheet = wb[sheet_name]
+        rows = []
+        for row in sheet.iter_rows(values_only=True):
+            row_text = " | ".join(str(cell) for cell in row if cell is not None)
+            if row_text.strip():
+                rows.append(row_text)
+
+        if rows:
+            section_text = "\n".join(rows)
+            sections.append(ParsedSection(header=f"Blatt: {sheet_name}", content=section_text))
+            full_text.append(f"[{sheet_name}]\n{section_text}")
+
+    return ParsedDocument(text="\n\n".join(full_text), sections=sections)
+
+
+def _parse_pptx(file_path: str) -> ParsedDocument:
+    """Parst eine PowerPoint-Datei."""
+    from pptx import Presentation
+
+    prs = Presentation(file_path)
+    sections = []
+    full_text = []
+
+    for i, slide in enumerate(prs.slides):
+        texts = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                texts.append(shape.text_frame.text)
+
+        if texts:
+            slide_text = "\n".join(texts)
+            sections.append(ParsedSection(header=f"Folie {i + 1}", content=slide_text, page_number=i + 1))
+            full_text.append(slide_text)
+
+    return ParsedDocument(text="\n\n".join(full_text), sections=sections, page_count=len(prs.slides))
+
+
+def _parse_text(file_path: str) -> ParsedDocument:
+    """Parst eine Textdatei."""
+    with open(file_path, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    return ParsedDocument(text=text, sections=[ParsedSection(header=None, content=text)])
+
+
+def _parse_csv(file_path: str) -> ParsedDocument:
+    """Parst eine CSV-Datei."""
+    import csv
+    rows = []
+    with open(file_path, encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            rows.append(" | ".join(row))
+
+    text = "\n".join(rows)
+    return ParsedDocument(text=text, sections=[ParsedSection(header=None, content=text)])
+
+
+def _parse_html(file_path: str) -> ParsedDocument:
+    """Parst eine HTML/XML-Datei."""
+    from bs4 import BeautifulSoup
+
+    with open(file_path, encoding="utf-8", errors="replace") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    text = soup.get_text(separator="\n", strip=True)
+    return ParsedDocument(text=text, sections=[ParsedSection(header=None, content=text)])
