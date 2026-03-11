@@ -132,6 +132,10 @@ retrieval:
   similarity_threshold: 0.3           # Minimale Ähnlichkeit (0.0-1.0)
   hybrid_search: true                 # Kombination aus Vektor + Volltext
   hybrid_alpha: 0.7                   # Gewichtung Vektor vs. Volltext (1.0 = nur Vektor)
+  # Query-Anreicherung: Erweitert Suchanfragen mit Glossar-/Kontextinformationen
+  # bevor die Retrieval-Suche ausgeführt wird
+  query_enrichment:
+    enabled: true                       # Query-Anreicherung aktivieren
 
 # -----------------------------------------------------------------------------
 # Unterstützte Dateiformate

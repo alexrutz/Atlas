@@ -197,7 +197,12 @@ async def ask_question_stream(
                 yield f"data: {data}\n\n"
             return StreamingResponse(no_collections(), media_type="text/event-stream")
 
-        results = await pipeline.retrieval.search(query=request.question, collection_ids=search_ids)
+        # Query-Anreicherung: Suchanfrage mit Glossar/Kontext erweitern
+        enriched_query = await pipeline.query_enrichment.enrich_query(
+            query=request.question, collection_ids=search_ids,
+        )
+
+        results = await pipeline.retrieval.search(query=enriched_query, collection_ids=search_ids)
 
         if not results:
             async def no_results():
