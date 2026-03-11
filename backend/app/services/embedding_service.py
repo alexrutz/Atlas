@@ -36,12 +36,12 @@ class EmbeddingService:
             for attempt in range(self.config.max_retries):
                 try:
                     response = await client.post(
-                        f"{self.base_url}/api/embeddings",
-                        json={"model": self.config.model, "prompt": text},
+                        f"{self.base_url}/api/embed",
+                        json={"model": self.config.model, "input": text},
                     )
                     response.raise_for_status()
                     data = response.json()
-                    return data["embedding"]
+                    return data["embeddings"][0]
                 except Exception as e:
                     logger.warning(f"Embedding-Versuch {attempt + 1} fehlgeschlagen: {e}")
                     if attempt == self.config.max_retries - 1:
