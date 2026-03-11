@@ -3,7 +3,7 @@
  */
 
 import { create } from 'zustand'
-import type { Conversation, Message, Collection, ChatResponse } from '../types'
+import type { Conversation, Message, Collection, ChatResponse, SourceChunk } from '../types'
 import { chatApi, collectionsApi } from '../services/api'
 
 interface ChatState {
@@ -13,15 +13,18 @@ interface ChatState {
   collections: Collection[]
   selectedCollectionIds: number[]
   isLoading: boolean
+  streamingContent: string
 
   loadConversations: () => Promise<void>
-  selectConversation: (id: number) => void
+  selectConversation: (id: number) => Promise<void>
   createConversation: () => Promise<void>
   deleteConversation: (id: number) => Promise<void>
   sendMessage: (question: string) => Promise<ChatResponse>
+  sendMessageStream: (question: string) => Promise<void>
   loadCollections: () => Promise<void>
   toggleCollection: (id: number) => void
   setSelectedCollections: (ids: number[]) => void
+  clearChat: () => void
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -31,15 +34,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
   collections: [],
   selectedCollectionIds: [],
   isLoading: false,
+  streamingContent: '',
 
   loadConversations: async () => {
     const conversations = await chatApi.listConversations()
     set({ conversations })
   },
 
-  selectConversation: (id) => {
-    set({ currentConversationId: id, messages: [] })
-    // TODO: Nachrichten der Konversation laden
+  selectConversation: async (id) => {
+    set({ currentConversationId: id, messages: [], isLoading: true })
+    try {
+      const messages = await chatApi.getMessages(id)
+      set({ messages, isLoading: false })
+    } catch {
+      set({ isLoading: false })
+    }
   },
 
   createConversation: async () => {
@@ -66,7 +75,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const response = await chatApi.ask(question, currentConversationId ?? undefined, selectedCollectionIds)
 
-      // Nachrichten aktualisieren
       const userMsg: Message = {
         id: Date.now(),
         role: 'user',
@@ -87,7 +95,105 @@ export const useChatStore = create<ChatState>((set, get) => ({
         currentConversationId: response.conversation_id,
       }))
 
+      get().loadConversations()
       return response
+    } finally {
+      set({ isLoading: false })
+    }
+  },
+
+  sendMessageStream: async (question) => {
+    const { currentConversationId, selectedCollectionIds } = get()
+
+    const userMsg: Message = {
+      id: Date.now(),
+      role: 'user',
+      content: question,
+      sources: [],
+      created_at: new Date().toISOString(),
+    }
+
+    set((state) => ({
+      messages: [...state.messages, userMsg],
+      isLoading: true,
+      streamingContent: '',
+    }))
+
+    try {
+      const response = await chatApi.askStream(question, currentConversationId ?? undefined, selectedCollectionIds)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(errorText || 'Streaming-Fehler')
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('Kein Stream verfügbar')
+
+      const decoder = new TextDecoder()
+      let fullContent = ''
+      let sources: SourceChunk[] = []
+      let conversationId = currentConversationId
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const text = decoder.decode(value, { stream: true })
+        const lines = text.split('\n')
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const jsonStr = line.slice(6).trim()
+          if (!jsonStr) continue
+
+          try {
+            const event = JSON.parse(jsonStr)
+
+            if (event.type === 'token') {
+              fullContent += event.content
+              set({ streamingContent: fullContent })
+            } else if (event.type === 'sources') {
+              sources = event.sources
+            } else if (event.type === 'done') {
+              conversationId = event.conversation_id
+            } else if (event.type === 'error') {
+              throw new Error(event.content)
+            }
+          } catch (e) {
+            if (e instanceof SyntaxError) continue
+            throw e
+          }
+        }
+      }
+
+      const assistantMsg: Message = {
+        id: Date.now() + 1,
+        role: 'assistant',
+        content: fullContent,
+        sources,
+        created_at: new Date().toISOString(),
+      }
+
+      set((state) => ({
+        messages: [...state.messages, assistantMsg],
+        currentConversationId: conversationId,
+        streamingContent: '',
+      }))
+
+      get().loadConversations()
+    } catch (error) {
+      const errorMsg: Message = {
+        id: Date.now() + 1,
+        role: 'assistant',
+        content: `Fehler: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`,
+        sources: [],
+        created_at: new Date().toISOString(),
+      }
+      set((state) => ({
+        messages: [...state.messages, errorMsg],
+        streamingContent: '',
+      }))
     } finally {
       set({ isLoading: false })
     }
@@ -111,5 +217,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setSelectedCollections: (ids) => {
     set({ selectedCollectionIds: ids })
     chatApi.updateSelectedCollections(ids)
+  },
+
+  clearChat: () => {
+    set({ currentConversationId: null, messages: [], streamingContent: '' })
   },
 }))
