@@ -22,7 +22,7 @@ server:
 # Datenbank-Konfiguration (PostgreSQL)
 # -----------------------------------------------------------------------------
 database:
-  host: "localhost"
+  host: "postgres"
   port: 5432
   name: "atlas"
   user: "atlas_user"
@@ -48,7 +48,7 @@ vector:
 # -----------------------------------------------------------------------------
 llm:
   provider: "ollama"                  # ollama oder vllm
-  base_url: "http://localhost:11434"  # Ollama API URL
+  base_url: "http://ollama:11434"     # Ollama API URL
   model: "llama3.1:8b"               # Modellname
   temperature: 0.1                    # Kreativität (0.0 = deterministisch)
   top_p: 0.9                         # Nucleus Sampling
@@ -71,7 +71,7 @@ llm:
 # -----------------------------------------------------------------------------
 embedding:
   provider: "ollama"                  # ollama, sentence-transformers oder custom
-  base_url: "http://localhost:11434"  # Embedding API URL
+  base_url: "http://ollama:11434"     # Embedding API URL
   model: "nomic-embed-text"           # Embedding-Modell
   dimensions: 1024                    # Muss mit vector.dimensions übereinstimmen
   batch_size: 32                      # Batch-Größe für Embedding-Berechnung
