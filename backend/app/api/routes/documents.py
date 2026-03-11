@@ -14,8 +14,26 @@ from app.models.user import User
 from app.models.document import Document
 from app.models.collection import Collection
 from app.schemas.document import DocumentResponse, DocumentContextUpdate, DocumentStatusResponse
+from app.core.database import async_session
 
 router = APIRouter()
+
+
+async def process_document_task(document_id: int) -> None:
+    """Background-Task: Dokument verarbeiten (Parsing, Chunking, Embedding)."""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starte Hintergrund-Verarbeitung für Dokument {document_id}")
+    from app.services.document_processor import DocumentProcessor
+    async with async_session() as db:
+        try:
+            processor = DocumentProcessor(db)
+            await processor.process(document_id)
+            await db.commit()
+            logger.info(f"Dokument {document_id} erfolgreich verarbeitet")
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Fehler bei Verarbeitung von Dokument {document_id}: {e}")
 
 
 @router.get("/collections/{collection_id}/documents", response_model=list[DocumentResponse])
@@ -90,8 +108,10 @@ async def upload_document(
     await db.flush()
     await db.refresh(document)
 
+    await db.flush()
+
     # Hintergrund-Verarbeitung starten
-    # background_tasks.add_task(process_document_task, document.id)
+    background_tasks.add_task(process_document_task, document.id)
 
     return document
 

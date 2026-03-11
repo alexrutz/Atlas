@@ -53,6 +53,14 @@ export interface Collection {
   document_count: number
 }
 
+// --- Zugriffsrechte ---
+export interface AccessInfo {
+  group_id: number
+  group_name: string
+  can_read: boolean
+  can_write: boolean
+}
+
 // --- Dokumente ---
 export interface Document {
   id: number
