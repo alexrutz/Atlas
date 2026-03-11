@@ -1,5 +1,8 @@
 """API-Routen: Chat und RAG-Pipeline."""
 
+import json
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,8 +14,11 @@ from app.models.user import User
 from app.models.conversation import Conversation, Message, UserSelectedCollection
 from app.schemas.chat import (
     ChatRequest, ChatResponse, ConversationResponse,
-    MessageResponse, SelectedCollectionsUpdate,
+    MessageResponse, SelectedCollectionsUpdate, SourceChunk,
 )
+from app.services.rag_pipeline import RAGPipeline
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -74,40 +80,201 @@ async def delete_conversation(
     await db.delete(conv)
 
 
+@router.get("/conversations/{conversation_id}/messages", response_model=list[MessageResponse])
+async def get_conversation_messages(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Nachrichten einer Konversation laden."""
+    # Prüfen ob Konversation dem Benutzer gehört
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.user_id == current_user.id,
+        )
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konversation nicht gefunden")
+
+    # Nachrichten laden
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at)
+    )
+    messages = result.scalars().all()
+
+    response = []
+    for msg in messages:
+        sources = []
+        if msg.source_chunks:
+            # Chunk-Infos für Quellenangaben laden
+            from app.models.chunk import Chunk
+            from app.models.document import Document
+            from app.models.collection import Collection
+            chunk_result = await db.execute(
+                select(
+                    Chunk.id, Chunk.content, Chunk.page_number,
+                    Document.original_name.label("document_name"),
+                    Collection.name.label("collection_name"),
+                )
+                .join(Document, Chunk.document_id == Document.id)
+                .join(Collection, Document.collection_id == Collection.id)
+                .where(Chunk.id.in_(msg.source_chunks))
+            )
+            for row in chunk_result.fetchall():
+                sources.append(SourceChunk(
+                    chunk_id=row.id,
+                    document_name=row.document_name,
+                    collection_name=row.collection_name,
+                    content_preview=row.content[:200] + "..." if len(row.content) > 200 else row.content,
+                    page_number=row.page_number,
+                    similarity_score=0.0,
+                ))
+
+        response.append(MessageResponse(
+            id=msg.id,
+            role=msg.role,
+            content=msg.content,
+            sources=sources,
+            created_at=msg.created_at,
+        ))
+    return response
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def ask_question(
     request: ChatRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Frage stellen und Antwort über die RAG-Pipeline erhalten.
+    """Frage stellen und Antwort über die RAG-Pipeline erhalten."""
+    try:
+        pipeline = RAGPipeline(db)
+        result = await pipeline.query(
+            question=request.question,
+            user=current_user,
+            conversation_id=request.conversation_id,
+            collection_ids=request.collection_ids,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"RAG-Pipeline Fehler: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Fehler bei der Antwortgenerierung: {str(e)}",
+        )
 
-    Ablauf:
-    1. Ausgewählte Collections des Benutzers laden (oder aus Request übernehmen)
-    2. Zugriffsrechte prüfen
-    3. Query-Embedding berechnen
-    4. Hybrid-Suche (Vektor + Volltext) in erlaubten Collections
-    5. Reranking der Ergebnisse
-    6. LLM-Prompt zusammenbauen (System-Prompt + Kontext + Frage)
-    7. Antwort generieren und mit Quellen zurückgeben
-    """
-    # TODO: Implementierung der RAG-Pipeline
-    # Hier wird der rag_pipeline Service aufgerufen:
-    #
-    # from app.services.rag_pipeline import RAGPipeline
-    # pipeline = RAGPipeline(db, settings)
-    # result = await pipeline.query(
-    #     question=request.question,
-    #     user=current_user,
-    #     conversation_id=request.conversation_id,
-    #     collection_ids=request.collection_ids,
-    # )
-    # return result
 
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="RAG-Pipeline noch nicht implementiert. Siehe IMPLEMENTATION_GUIDE.md Phase 3.",
-    )
+@router.post("/chat/stream")
+async def ask_question_stream(
+    request: ChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Frage stellen mit Streaming-Antwort über Server-Sent Events."""
+    pipeline = RAGPipeline(db)
+
+    try:
+        # Retrieval durchführen (nicht-streaming Teil)
+        allowed_ids = await pipeline._get_allowed_collection_ids(current_user)
+        if not allowed_ids:
+            async def no_access():
+                data = json.dumps({"type": "error", "content": "Sie haben keinen Zugriff auf Collections."})
+                yield f"data: {data}\n\n"
+            return StreamingResponse(no_access(), media_type="text/event-stream")
+
+        if request.collection_ids:
+            search_ids = [cid for cid in request.collection_ids if cid in allowed_ids]
+        else:
+            search_ids = await pipeline._get_selected_collection_ids(current_user, allowed_ids)
+
+        if not search_ids:
+            async def no_collections():
+                data = json.dumps({"type": "error", "content": "Bitte wählen Sie mindestens eine Collection aus."})
+                yield f"data: {data}\n\n"
+            return StreamingResponse(no_collections(), media_type="text/event-stream")
+
+        results = await pipeline.retrieval.search(query=request.question, collection_ids=search_ids)
+
+        if not results:
+            async def no_results():
+                data = json.dumps({"type": "error", "content": "Keine relevanten Informationen gefunden."})
+                yield f"data: {data}\n\n"
+            return StreamingResponse(no_results(), media_type="text/event-stream")
+
+        # Quellen aufbauen
+        sources = [
+            SourceChunk(
+                chunk_id=r.chunk_id,
+                document_name=r.document_name,
+                collection_name=r.collection_name,
+                content_preview=r.content[:200] + "..." if len(r.content) > 200 else r.content,
+                page_number=r.page_number,
+                similarity_score=r.similarity_score,
+            )
+            for r in results
+        ]
+
+        # Prompt bauen
+        contexts = [
+            {"content": r.content, "document_name": r.document_name, "page_number": r.page_number}
+            for r in results
+        ]
+        prompt = pipeline.llm.build_rag_prompt(request.question, contexts)
+
+        async def event_stream():
+            full_answer = ""
+            try:
+                # Quellen zuerst senden
+                sources_data = json.dumps({
+                    "type": "sources",
+                    "sources": [s.model_dump() for s in sources],
+                })
+                yield f"data: {sources_data}\n\n"
+
+                # Streaming-Antwort
+                async for token in pipeline.llm.generate_stream(prompt):
+                    full_answer += token
+                    data = json.dumps({"type": "token", "content": token})
+                    yield f"data: {data}\n\n"
+
+                # Konversation speichern
+                conv_id = await pipeline._save_to_conversation(
+                    user=current_user,
+                    conversation_id=request.conversation_id,
+                    question=request.question,
+                    answer=full_answer,
+                    results=results,
+                    search_ids=search_ids,
+                )
+                await db.commit()
+
+                done_data = json.dumps({"type": "done", "conversation_id": conv_id})
+                yield f"data: {done_data}\n\n"
+            except Exception as e:
+                logger.error(f"Streaming-Fehler: {e}", exc_info=True)
+                error_data = json.dumps({"type": "error", "content": str(e)})
+                yield f"data: {error_data}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"Stream-Setup Fehler: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Fehler bei der Antwortgenerierung: {str(e)}",
+        )
 
 
 @router.put("/chat/collections", status_code=status.HTTP_204_NO_CONTENT)
