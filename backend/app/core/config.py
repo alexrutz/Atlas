@@ -58,7 +58,7 @@ class VectorConfig(BaseModel):
 class LLMConfig(BaseModel):
     provider: str = "ollama"
     base_url: str = "http://localhost:11434"
-    model: str = "llama3.1:70b"
+    model: str = "llama3.1:8b"
     temperature: float = 0.1
     top_p: float = 0.9
     top_k: int = 40
@@ -131,9 +131,9 @@ class AuthConfig(BaseModel):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
     refresh_token_expire_days: int = 30
-    min_password_length: int = 8
+    min_password_length: int = 5
     default_admin_username: str = "admin"
-    default_admin_password: str = "Admin123!"
+    default_admin_password: str = "admin"
 
 
 class LoggingConfig(BaseModel):
