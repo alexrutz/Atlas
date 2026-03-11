@@ -8,8 +8,8 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { usersApi, groupsApi } from '../services/api'
-import type { UserDetail, Group } from '../types'
+import { usersApi, groupsApi, collectionsApi } from '../services/api'
+import type { UserDetail, Group, Collection, AccessInfo } from '../types'
 
 type Tab = 'users' | 'groups' | 'collections'
 
@@ -610,23 +610,339 @@ function GroupsTab() {
 }
 
 // =============================================================================
-// Collections Tab (Platzhalter - Phase 3)
+// Collections Tab
 // =============================================================================
 
+interface CollectionFormData {
+  name: string
+  description: string
+}
+
+const emptyCollectionForm: CollectionFormData = { name: '', description: '' }
+
 function CollectionsTab() {
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [groups, setGroups] = useState<Group[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editingCollection, setEditingCollection] = useState<Collection | null>(null)
+  const [formData, setFormData] = useState<CollectionFormData>(emptyCollectionForm)
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [managingAccess, setManagingAccess] = useState<Collection | null>(null)
+  const [accessList, setAccessList] = useState<AccessInfo[]>([])
+  const [accessLoading, setAccessLoading] = useState(false)
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true)
+      const [colsData, groupsData] = await Promise.all([
+        collectionsApi.list(),
+        groupsApi.list(),
+      ])
+      setCollections(colsData)
+      setGroups(groupsData)
+    } catch {
+      setError('Daten konnten nicht geladen werden')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  const openCreate = () => {
+    setEditingCollection(null)
+    setFormData(emptyCollectionForm)
+    setError('')
+    setShowForm(true)
+  }
+
+  const openEdit = (col: Collection) => {
+    setEditingCollection(col)
+    setFormData({ name: col.name, description: col.description || '' })
+    setError('')
+    setShowForm(true)
+  }
+
+  const handleSave = async () => {
+    setError('')
+    setSaving(true)
+    try {
+      if (editingCollection) {
+        await collectionsApi.update(editingCollection.id, { ...formData })
+      } else {
+        await collectionsApi.create(formData)
+      }
+      setShowForm(false)
+      await loadData()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Fehler beim Speichern')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (col: Collection) => {
+    if (!confirm(`Collection "${col.name}" wirklich löschen? Alle Dokumente und Chunks werden ebenfalls gelöscht.`)) return
+    try {
+      await collectionsApi.delete(col.id)
+      await loadData()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Fehler beim Löschen')
+    }
+  }
+
+  const openAccessManagement = async (col: Collection) => {
+    setManagingAccess(col)
+    setAccessLoading(true)
+    setError('')
+    try {
+      const data = await collectionsApi.getAccess(col.id)
+      setAccessList(data)
+    } catch {
+      setAccessList([])
+    } finally {
+      setAccessLoading(false)
+    }
+  }
+
+  const handleAccessChange = async (groupId: number, canRead: boolean, canWrite: boolean) => {
+    if (!managingAccess) return
+    try {
+      await collectionsApi.setAccess(managingAccess.id, groupId, canRead, canWrite)
+      const data = await collectionsApi.getAccess(managingAccess.id)
+      setAccessList(data)
+    } catch {
+      setError('Fehler beim Aktualisieren der Zugriffsrechte')
+    }
+  }
+
+  const handleRemoveAccess = async (groupId: number) => {
+    if (!managingAccess) return
+    try {
+      await collectionsApi.removeAccess(managingAccess.id, groupId)
+      setAccessList((prev) => prev.filter((a) => a.group_id !== groupId))
+    } catch {
+      setError('Fehler beim Entfernen der Zugriffsrechte')
+    }
+  }
+
+  if (loading) return <div className="text-gray-500">Laden...</div>
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold">Collections</h2>
-        <button className="px-4 py-2 bg-atlas-600 text-white rounded hover:bg-atlas-700 text-sm opacity-50 cursor-not-allowed" disabled>
+        <button
+          onClick={openCreate}
+          className="px-4 py-2 bg-atlas-600 text-white rounded hover:bg-atlas-700 text-sm"
+        >
           Neue Collection
         </button>
       </div>
-      <p className="text-gray-500 text-sm">
-        Collections gruppieren ähnliche Dokumente (z.B. Normen, Datenblätter, Anfragen).
-        Hier kann der Zugriff für Gruppen konfiguriert werden.
-        Diese Funktion wird in Phase 3 implementiert.
-      </p>
+
+      {error && <div className="bg-red-50 text-red-600 p-3 rounded text-sm mb-4">{error}</div>}
+
+      {/* Collections-Tabelle */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-left">
+            <tr>
+              <th className="px-4 py-3 font-medium text-gray-600">Name</th>
+              <th className="px-4 py-3 font-medium text-gray-600">Beschreibung</th>
+              <th className="px-4 py-3 font-medium text-gray-600">Dokumente</th>
+              <th className="px-4 py-3 font-medium text-gray-600">Zugriff</th>
+              <th className="px-4 py-3 font-medium text-gray-600">Aktionen</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {collections.map((col) => (
+              <tr key={col.id} className="hover:bg-gray-50">
+                <td className="px-4 py-3 font-medium">{col.name}</td>
+                <td className="px-4 py-3 text-gray-500">{col.description || '-'}</td>
+                <td className="px-4 py-3">{col.document_count}</td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={() => openAccessManagement(col)}
+                    className="text-atlas-600 hover:text-atlas-800 text-xs font-medium"
+                  >
+                    Zugriff verwalten
+                  </button>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openEdit(col)}
+                      className="text-atlas-600 hover:text-atlas-800 text-xs font-medium"
+                    >
+                      Bearbeiten
+                    </button>
+                    <button
+                      onClick={() => handleDelete(col)}
+                      className="text-red-600 hover:text-red-800 text-xs font-medium"
+                    >
+                      Löschen
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {collections.length === 0 && (
+          <div className="text-center py-8 text-gray-500 text-sm">Keine Collections vorhanden</div>
+        )}
+      </div>
+
+      {/* Collection-Formular Dialog */}
+      {showForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">
+              {editingCollection ? 'Collection bearbeiten' : 'Neue Collection'}
+            </h3>
+            {error && <div className="bg-red-50 text-red-600 p-3 rounded text-sm mb-4">{error}</div>}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="z.B. Normen, Datenblätter, Anfragen"
+                  className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-atlas-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Beschreibung</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  rows={3}
+                  placeholder="Beschreiben Sie den Zweck dieser Collection..."
+                  className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-atlas-500 outline-none resize-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => setShowForm(false)}
+                className="px-4 py-2 border rounded text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-4 py-2 bg-atlas-600 text-white rounded text-sm hover:bg-atlas-700 disabled:opacity-50"
+              >
+                {saving ? 'Speichern...' : 'Speichern'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Zugriffsverwaltung Dialog */}
+      {managingAccess && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg">
+            <h3 className="text-lg font-semibold mb-2">
+              Zugriff: {managingAccess.name}
+            </h3>
+            <p className="text-xs text-gray-500 mb-4">
+              Legen Sie fest, welche Gruppen auf diese Collection zugreifen dürfen.
+            </p>
+            {error && <div className="bg-red-50 text-red-600 p-3 rounded text-sm mb-4">{error}</div>}
+
+            {accessLoading ? (
+              <div className="text-gray-500 text-sm py-4">Laden...</div>
+            ) : (
+              <div className="space-y-4">
+                {/* Bestehende Zugriffe */}
+                {accessList.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Aktuelle Zugriffe</h4>
+                    <div className="space-y-2">
+                      {accessList.map((access) => (
+                        <div key={access.group_id} className="flex items-center gap-3 p-2 bg-gray-50 rounded">
+                          <span className="text-sm font-medium flex-1">{access.group_name}</span>
+                          <label className="flex items-center gap-1 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={access.can_read}
+                              onChange={(e) => handleAccessChange(access.group_id, e.target.checked, access.can_write)}
+                              className="rounded border-gray-300"
+                            />
+                            Lesen
+                          </label>
+                          <label className="flex items-center gap-1 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={access.can_write}
+                              onChange={(e) => handleAccessChange(access.group_id, access.can_read, e.target.checked)}
+                              className="rounded border-gray-300"
+                            />
+                            Schreiben
+                          </label>
+                          <button
+                            onClick={() => handleRemoveAccess(access.group_id)}
+                            className="text-red-500 hover:text-red-700 text-xs"
+                          >
+                            Entfernen
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Neue Gruppe hinzufügen */}
+                {groups.filter((g) => !accessList.some((a) => a.group_id === g.id)).length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Gruppe hinzufügen</h4>
+                    <div className="space-y-1">
+                      {groups
+                        .filter((g) => !accessList.some((a) => a.group_id === g.id))
+                        .map((group) => (
+                          <div key={group.id} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
+                            <span className="text-sm">{group.name}</span>
+                            <button
+                              onClick={() => handleAccessChange(group.id, true, false)}
+                              className="text-atlas-600 hover:text-atlas-800 text-xs font-medium"
+                            >
+                              Zugriff gewähren
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {groups.length === 0 && (
+                  <p className="text-sm text-gray-500">
+                    Erstellen Sie zuerst Gruppen im Gruppen-Tab.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end mt-6">
+              <button
+                onClick={() => { setManagingAccess(null); loadData() }}
+                className="px-4 py-2 bg-atlas-600 text-white rounded text-sm hover:bg-atlas-700"
+              >
+                Fertig
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

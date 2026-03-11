@@ -36,6 +36,15 @@ class AccessGrant(BaseModel):
     can_write: bool = False
 
 
+class AccessInfo(BaseModel):
+    group_id: int
+    group_name: str
+    can_read: bool
+    can_write: bool
+
+    model_config = {"from_attributes": True}
+
+
 class GlossaryEntryCreate(BaseModel):
     term: str
     definition: str

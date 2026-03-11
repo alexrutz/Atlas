@@ -7,7 +7,7 @@
 
 import axios from 'axios'
 import type {
-  LoginResponse, Collection, Document, GlossaryEntry,
+  LoginResponse, Collection, Document, GlossaryEntry, AccessInfo,
   Conversation, ChatResponse, Group, UserDetail,
 } from '../types'
 
@@ -119,22 +119,37 @@ export const collectionsApi = {
   delete: (id: number) => api.delete(`/collections/${id}`),
   setAccess: (collectionId: number, groupId: number, canRead: boolean, canWrite: boolean) =>
     api.post(`/collections/${collectionId}/access`, { group_id: groupId, can_read: canRead, can_write: canWrite }),
+  removeAccess: (collectionId: number, groupId: number) =>
+    api.delete(`/collections/${collectionId}/access/${groupId}`),
+  getAccess: (collectionId: number) =>
+    api.get<AccessInfo[]>(`/collections/${collectionId}/access`).then(r => r.data),
   getGlossary: (collectionId: number) =>
     api.get<GlossaryEntry[]>(`/collections/${collectionId}/glossary`).then(r => r.data),
   addGlossaryEntry: (collectionId: number, data: { term: string; definition: string; abbreviation?: string }) =>
-    api.post(`/collections/${collectionId}/glossary`, data).then(r => r.data),
+    api.post<GlossaryEntry>(`/collections/${collectionId}/glossary`, data).then(r => r.data),
+  updateGlossaryEntry: (collectionId: number, entryId: number, data: { term: string; definition: string; abbreviation?: string }) =>
+    api.put<GlossaryEntry>(`/collections/${collectionId}/glossary/${entryId}`, data).then(r => r.data),
+  deleteGlossaryEntry: (collectionId: number, entryId: number) =>
+    api.delete(`/collections/${collectionId}/glossary/${entryId}`),
+  autoExtractGlossary: (collectionId: number) =>
+    api.post<GlossaryEntry[]>(`/collections/${collectionId}/glossary/auto-extract`).then(r => r.data),
 }
 
 // --- Documents ---
 export const documentsApi = {
   list: (collectionId: number) =>
     api.get<Document[]>(`/collections/${collectionId}/documents`).then(r => r.data),
-  upload: (collectionId: number, file: File, contextDescription?: string) => {
+  upload: (collectionId: number, file: File, contextDescription?: string, onProgress?: (percent: number) => void) => {
     const formData = new FormData()
     formData.append('file', file)
     if (contextDescription) formData.append('context_description', contextDescription)
     return api.post<Document>(`/collections/${collectionId}/documents`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) {
+          onProgress(Math.round((e.loaded * 100) / e.total))
+        }
+      },
     }).then(r => r.data)
   },
   delete: (documentId: number) => api.delete(`/documents/${documentId}`),
