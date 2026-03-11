@@ -158,6 +158,14 @@ export const documentsApi = {
   getStatus: (documentId: number) => api.get(`/documents/${documentId}/status`).then(r => r.data),
 }
 
+// --- Settings ---
+export const settingsApi = {
+  getGlobalContext: () =>
+    api.get<{ context_text: string }>('/settings/global-context').then(r => r.data),
+  updateGlobalContext: (contextText: string) =>
+    api.put<{ context_text: string }>('/settings/global-context', { context_text: contextText }).then(r => r.data),
+}
+
 // --- Chat ---
 export const chatApi = {
   listConversations: () => api.get<Conversation[]>('/conversations').then(r => r.data),

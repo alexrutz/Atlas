@@ -15,10 +15,10 @@
  * └──────────────────────────────────────────────────────┘
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useChatStore } from '../stores/chatStore'
-import type { SourceChunk } from '../types'
+import type { Collection, SourceChunk } from '../types'
 
 function SourcesPanel({ sources }: { sources: SourceChunk[] }) {
   const [expanded, setExpanded] = useState(false)
@@ -68,22 +68,74 @@ function SourcesPanel({ sources }: { sources: SourceChunk[] }) {
   )
 }
 
+function CollectionContextField({ collection, onSave }: { collection: Collection; onSave: (id: number, text: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(collection.context_text || '')
+
+  const handleSave = () => {
+    onSave(collection.id, value)
+    setEditing(false)
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        className="text-[10px] text-gray-400 hover:text-atlas-600 mt-0.5 truncate block w-full text-left"
+        title={collection.context_text || 'Kontext hinzufügen...'}
+      >
+        {collection.context_text ? `Kontext: ${collection.context_text.slice(0, 30)}...` : '+ Kontext'}
+      </button>
+    )
+  }
+
+  return (
+    <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+      <textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="z.B. L1 beschreibt die Kühlerlänge, B2 ist die Breite des Gehäuses..."
+        className="w-full text-xs p-1.5 border rounded resize-none focus:ring-1 focus:ring-atlas-500 outline-none"
+        rows={3}
+        autoFocus
+      />
+      <div className="flex gap-1 mt-1">
+        <button onClick={handleSave} className="text-[10px] px-2 py-0.5 bg-atlas-600 text-white rounded hover:bg-atlas-700">
+          Speichern
+        </button>
+        <button onClick={() => setEditing(false)} className="text-[10px] px-2 py-0.5 bg-gray-200 rounded hover:bg-gray-300">
+          Abbrechen
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function ChatPage() {
   const {
     conversations, currentConversationId, messages, collections,
-    selectedCollectionIds, isLoading, streamingContent,
+    selectedCollectionIds, isLoading, streamingContent, globalContext,
     loadConversations, selectConversation,
     deleteConversation, loadCollections, toggleCollection,
-    sendMessageStream, clearChat,
+    sendMessageStream, clearChat, loadGlobalContext,
+    updateGlobalContext, updateCollectionContext,
   } = useChatStore()
 
   const [input, setInput] = useState('')
+  const [showGlobalContext, setShowGlobalContext] = useState(false)
+  const [globalContextDraft, setGlobalContextDraft] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadCollections()
     loadConversations()
-  }, [loadCollections, loadConversations])
+    loadGlobalContext()
+  }, [loadCollections, loadConversations, loadGlobalContext])
+
+  const handleSaveGlobalContext = useCallback(() => {
+    updateGlobalContext(globalContextDraft)
+    setShowGlobalContext(false)
+  }, [globalContextDraft, updateGlobalContext])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -145,22 +197,57 @@ export default function ChatPage() {
       </div>
 
       {/* Collection-Sidebar */}
-      <div className="w-56 border-r bg-white p-4 overflow-y-auto">
+      <div className="w-64 border-r bg-white p-4 overflow-y-auto flex flex-col">
+        {/* Globaler Kontext */}
+        <div className="mb-3 pb-3 border-b border-gray-200">
+          <button
+            onClick={() => { setShowGlobalContext(!showGlobalContext); setGlobalContextDraft(globalContext) }}
+            className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-atlas-600 uppercase w-full"
+          >
+            <span className={`inline-block transition-transform text-[10px] ${showGlobalContext ? 'rotate-90' : ''}`}>&#9654;</span>
+            Allgemeiner Kontext
+            {globalContext && <span className="ml-auto w-2 h-2 rounded-full bg-atlas-500 shrink-0" title="Kontext gesetzt" />}
+          </button>
+          {showGlobalContext && (
+            <div className="mt-2">
+              <textarea
+                value={globalContextDraft}
+                onChange={(e) => setGlobalContextDraft(e.target.value)}
+                placeholder="Allgemeiner Kontext für alle Collections, z.B. Erklärungen zu Variablen und Abkürzungen..."
+                className="w-full text-xs p-2 border rounded resize-none focus:ring-1 focus:ring-atlas-500 outline-none"
+                rows={4}
+              />
+              <button
+                onClick={handleSaveGlobalContext}
+                className="mt-1 text-[10px] px-2 py-0.5 bg-atlas-600 text-white rounded hover:bg-atlas-700"
+              >
+                Speichern
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Collections */}
         <h3 className="font-semibold text-sm text-gray-500 uppercase mb-3">Collections</h3>
         {collections.length === 0 && (
           <p className="text-xs text-gray-400">Keine Collections verfügbar</p>
         )}
         {collections.map((col) => (
-          <label key={col.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-            <input
-              type="checkbox"
-              checked={selectedCollectionIds.includes(col.id)}
-              onChange={() => toggleCollection(col.id)}
-              className="rounded border-gray-300 text-atlas-600 focus:ring-atlas-500"
-            />
-            <span className="text-sm truncate">{col.name}</span>
-            <span className="text-xs text-gray-400 ml-auto shrink-0">{col.document_count}</span>
-          </label>
+          <div key={col.id} className="p-2 hover:bg-gray-50 rounded">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectedCollectionIds.includes(col.id)}
+                onChange={() => toggleCollection(col.id)}
+                className="rounded border-gray-300 text-atlas-600 focus:ring-atlas-500"
+              />
+              <span className="text-sm truncate">{col.name}</span>
+              <span className="text-xs text-gray-400 ml-auto shrink-0">{col.document_count}</span>
+            </label>
+            <div className="ml-6">
+              <CollectionContextField collection={col} onSave={updateCollectionContext} />
+            </div>
+          </div>
         ))}
       </div>
 

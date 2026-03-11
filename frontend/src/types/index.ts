@@ -47,6 +47,7 @@ export interface Collection {
   id: number
   name: string
   description: string | null
+  context_text: string | null
   created_at: string
   can_read: boolean
   can_write: boolean

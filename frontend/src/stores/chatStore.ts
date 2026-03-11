@@ -4,7 +4,7 @@
 
 import { create } from 'zustand'
 import type { Conversation, Message, Collection, ChatResponse, SourceChunk } from '../types'
-import { chatApi, collectionsApi } from '../services/api'
+import { chatApi, collectionsApi, settingsApi } from '../services/api'
 
 interface ChatState {
   conversations: Conversation[]
@@ -14,6 +14,7 @@ interface ChatState {
   selectedCollectionIds: number[]
   isLoading: boolean
   streamingContent: string
+  globalContext: string
 
   loadConversations: () => Promise<void>
   selectConversation: (id: number) => Promise<void>
@@ -25,6 +26,9 @@ interface ChatState {
   toggleCollection: (id: number) => void
   setSelectedCollections: (ids: number[]) => void
   clearChat: () => void
+  loadGlobalContext: () => Promise<void>
+  updateGlobalContext: (text: string) => Promise<void>
+  updateCollectionContext: (collectionId: number, text: string) => Promise<void>
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -35,6 +39,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectedCollectionIds: [],
   isLoading: false,
   streamingContent: '',
+  globalContext: '',
 
   loadConversations: async () => {
     const conversations = await chatApi.listConversations()
@@ -221,5 +226,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   clearChat: () => {
     set({ currentConversationId: null, messages: [], streamingContent: '' })
+  },
+
+  loadGlobalContext: async () => {
+    try {
+      const data = await settingsApi.getGlobalContext()
+      set({ globalContext: data.context_text })
+    } catch {
+      // Ignore errors on load
+    }
+  },
+
+  updateGlobalContext: async (text: string) => {
+    set({ globalContext: text })
+    await settingsApi.updateGlobalContext(text)
+  },
+
+  updateCollectionContext: async (collectionId: number, text: string) => {
+    await collectionsApi.update(collectionId, { context_text: text })
+    set((state) => ({
+      collections: state.collections.map((c) =>
+        c.id === collectionId ? { ...c, context_text: text } : c
+      ),
+    }))
   },
 }))

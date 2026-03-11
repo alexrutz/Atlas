@@ -8,17 +8,20 @@ from pydantic import BaseModel
 class CollectionCreate(BaseModel):
     name: str
     description: str | None = None
+    context_text: str | None = None
 
 
 class CollectionUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    context_text: str | None = None
 
 
 class CollectionResponse(BaseModel):
     id: int
     name: str
     description: str | None
+    context_text: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
