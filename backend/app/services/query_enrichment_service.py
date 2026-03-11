@@ -20,7 +20,9 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.models.chunk import GlossaryEntry
+from app.models.collection import Collection
 from app.models.document import Document
+from app.models.system_setting import SystemSetting
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +69,39 @@ class QueryEnrichmentService:
 
     async def _load_context(self, collection_ids: list[int]) -> str:
         """
-        Lädt Glossar-Einträge und Kontext-Beschreibungen für die angegebenen Collections.
+        Lädt den globalen Kontext, pro-Collection Kontexte, Glossar-Einträge
+        und Dokument-Beschreibungen.
+
+        Der effektive Kontext ist: globaler Kontext + Summe der Collection-Kontexte.
 
         Returns:
             Zusammengesetzter Kontext-String für das LLM
         """
         parts = []
 
-        # 1. Collection-Level Glossar-Einträge laden
+        # 1. Globalen Kontext laden
+        result = await self.db.execute(
+            select(SystemSetting.value).where(SystemSetting.key == "global_context")
+        )
+        global_context = result.scalar_one_or_none()
+        if global_context:
+            parts.append("Allgemeiner Kontext:\n" + global_context)
+
+        # 2. Pro-Collection Kontext-Texte laden
+        result = await self.db.execute(
+            select(Collection.name, Collection.context_text)
+            .where(Collection.id.in_(collection_ids))
+        )
+        collection_contexts = result.fetchall()
+
+        col_context_lines = []
+        for col in collection_contexts:
+            if col.context_text:
+                col_context_lines.append(f"- {col.name}: {col.context_text}")
+        if col_context_lines:
+            parts.append("Collection-Kontext:\n" + "\n".join(col_context_lines))
+
+        # 3. Collection-Level Glossar-Einträge laden
         result = await self.db.execute(
             select(GlossaryEntry.term, GlossaryEntry.definition, GlossaryEntry.abbreviation)
             .where(GlossaryEntry.collection_id.in_(collection_ids))
@@ -90,7 +117,7 @@ class QueryEnrichmentService:
                 glossary_lines.append(line)
             parts.append("Glossar-Einträge:\n" + "\n".join(glossary_lines))
 
-        # 2. Dokument-Level Glossare und Kontext-Beschreibungen laden
+        # 4. Dokument-Level Glossare und Kontext-Beschreibungen laden
         result = await self.db.execute(
             select(Document.original_name, Document.context_description, Document.glossary)
             .where(

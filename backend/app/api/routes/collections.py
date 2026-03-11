@@ -52,6 +52,7 @@ async def list_accessible_collections(
         doc_count = count_result.scalar() or 0
         response.append(CollectionWithAccess(
             id=col.id, name=col.name, description=col.description,
+            context_text=col.context_text,
             created_at=col.created_at, document_count=doc_count,
             can_read=True, can_write=current_user.is_admin,
         ))
