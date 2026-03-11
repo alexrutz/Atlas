@@ -46,7 +46,7 @@ class DatabaseConfig(BaseModel):
 
 
 class VectorConfig(BaseModel):
-    dimensions: int = 1024
+    dimensions: int = 768
     index_type: str = "ivfflat"
     distance_metric: str = "cosine"
     ivfflat_lists: int = 100
@@ -75,7 +75,7 @@ class EmbeddingConfig(BaseModel):
     provider: str = "ollama"
     base_url: str = "http://ollama:11434"
     model: str = "nomic-embed-text"
-    dimensions: int = 1024
+    dimensions: int = 768
     batch_size: int = 32
     max_retries: int = 3
     timeout: int = 60
