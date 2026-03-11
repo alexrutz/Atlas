@@ -27,7 +27,7 @@ class ServerConfig(BaseModel):
 
 
 class DatabaseConfig(BaseModel):
-    host: str = "localhost"
+    host: str = "postgres"
     port: int = 5432
     name: str = "atlas"
     user: str = "atlas_user"
@@ -57,7 +57,7 @@ class VectorConfig(BaseModel):
 
 class LLMConfig(BaseModel):
     provider: str = "ollama"
-    base_url: str = "http://localhost:11434"
+    base_url: str = "http://ollama:11434"
     model: str = "llama3.1:8b"
     temperature: float = 0.1
     top_p: float = 0.9
@@ -73,7 +73,7 @@ class LLMConfig(BaseModel):
 
 class EmbeddingConfig(BaseModel):
     provider: str = "ollama"
-    base_url: str = "http://localhost:11434"
+    base_url: str = "http://ollama:11434"
     model: str = "nomic-embed-text"
     dimensions: int = 1024
     batch_size: int = 32
