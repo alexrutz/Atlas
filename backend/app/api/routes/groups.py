@@ -14,11 +14,13 @@ from app.schemas.group import GroupCreate, GroupUpdate, GroupResponse, GroupWith
 router = APIRouter()
 
 
-@router.get("", response_model=list[GroupResponse])
+@router.get("", response_model=list[GroupWithMembers])
 async def list_groups(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
-    """Alle Gruppen auflisten (Admin)."""
-    result = await db.execute(select(Group).order_by(Group.name))
-    return result.scalars().all()
+    """Alle Gruppen mit Mitgliedern auflisten (Admin)."""
+    result = await db.execute(
+        select(Group).options(selectinload(Group.members)).order_by(Group.name)
+    )
+    return result.scalars().unique().all()
 
 
 @router.post("", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
