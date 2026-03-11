@@ -49,7 +49,7 @@ vector:
 llm:
   provider: "ollama"                  # ollama oder vllm
   base_url: "http://localhost:11434"  # Ollama API URL
-  model: "llama3.1:70b"              # Modellname
+  model: "llama3.1:8b"               # Modellname
   temperature: 0.1                    # Kreativität (0.0 = deterministisch)
   top_p: 0.9                         # Nucleus Sampling
   top_k: 40                          # Top-K Sampling
@@ -163,7 +163,7 @@ auth:
   algorithm: "HS256"                   # JWT Algorithmus
   access_token_expire_minutes: 480     # Token-Gültigkeit (8 Stunden)
   refresh_token_expire_days: 30        # Refresh-Token-Gültigkeit
-  min_password_length: 8              # Minimale Passwortlänge
+  min_password_length: 5              # Minimale Passwortlänge
   default_admin_username: "admin"      # Standard-Admin-Benutzername
   default_admin_password: "${ADMIN_DEFAULT_PASSWORD}" # Nur beim ersten Start
 
