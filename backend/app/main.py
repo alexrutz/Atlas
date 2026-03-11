@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.database import engine, Base, async_session
@@ -40,8 +41,12 @@ async def seed_admin_user():
             is_active=True,
         )
         session.add(admin)
-        await session.commit()
-        logger.info(f"Admin-Benutzer '{settings.auth.default_admin_username}' wurde erstellt.")
+        try:
+            await session.commit()
+            logger.info(f"Admin-Benutzer '{settings.auth.default_admin_username}' wurde erstellt.")
+        except IntegrityError:
+            await session.rollback()
+            logger.info("Admin-Benutzer wurde bereits von einem anderen Worker erstellt.")
 
 
 @asynccontextmanager
