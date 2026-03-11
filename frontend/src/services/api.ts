@@ -8,7 +8,7 @@
 import axios from 'axios'
 import type {
   LoginResponse, Collection, Document, GlossaryEntry,
-  Conversation, ChatResponse, Group,
+  Conversation, ChatResponse, Group, UserDetail,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -22,11 +22,59 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Bei 401 automatisch ausloggen
+// Bei 401: Token-Refresh versuchen, sonst ausloggen
+let isRefreshing = false
+let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = []
+
+function processQueue(error: unknown, token: string | null) {
+  failedQueue.forEach((p) => {
+    if (token) p.resolve(token)
+    else p.reject(error)
+  })
+  failedQueue = []
+}
+
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
+  async (error) => {
+    const originalRequest = error.config
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({
+            resolve: (token: string) => {
+              originalRequest.headers.Authorization = `Bearer ${token}`
+              resolve(api(originalRequest))
+            },
+            reject,
+          })
+        })
+      }
+      originalRequest._retry = true
+      isRefreshing = true
+
+      const refreshToken = localStorage.getItem('atlas_refresh_token')
+      if (refreshToken) {
+        try {
+          const { data } = await axios.post<LoginResponse>('/api/auth/refresh', { refresh_token: refreshToken })
+          localStorage.setItem('atlas_token', data.access_token)
+          localStorage.setItem('atlas_refresh_token', data.refresh_token)
+          localStorage.setItem('atlas_user', JSON.stringify(data.user))
+          processQueue(null, data.access_token)
+          originalRequest.headers.Authorization = `Bearer ${data.access_token}`
+          return api(originalRequest)
+        } catch (refreshError) {
+          processQueue(refreshError, null)
+          localStorage.removeItem('atlas_token')
+          localStorage.removeItem('atlas_refresh_token')
+          localStorage.removeItem('atlas_user')
+          window.location.href = '/login'
+          return Promise.reject(refreshError)
+        } finally {
+          isRefreshing = false
+        }
+      }
+
       localStorage.removeItem('atlas_token')
       window.location.href = '/login'
     }
@@ -39,15 +87,15 @@ export const authApi = {
   login: (username: string, password: string) =>
     api.post<LoginResponse>('/auth/login', { username, password }).then(r => r.data),
   refresh: (refreshToken: string) =>
-    api.post<LoginResponse>('/auth/refresh', null, { params: { refresh_token: refreshToken } }).then(r => r.data),
+    api.post<LoginResponse>('/auth/refresh', { refresh_token: refreshToken }).then(r => r.data),
 }
 
 // --- Users (Admin) ---
 export const usersApi = {
-  list: () => api.get('/users').then(r => r.data),
+  list: () => api.get<UserDetail[]>('/users').then(r => r.data),
   create: (data: { username: string; email: string; password: string; full_name: string; is_admin?: boolean }) =>
-    api.post('/users', data).then(r => r.data),
-  update: (id: number, data: Record<string, unknown>) => api.put(`/users/${id}`, data).then(r => r.data),
+    api.post<UserDetail>('/users', data).then(r => r.data),
+  update: (id: number, data: Record<string, unknown>) => api.put<UserDetail>(`/users/${id}`, data).then(r => r.data),
   delete: (id: number) => api.delete(`/users/${id}`),
 }
 

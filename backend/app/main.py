@@ -9,12 +9,39 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import engine, Base, async_session
+from app.core.security import hash_password
 from app.api.routes import auth, users, groups, collections, documents, chat
 
 logger = logging.getLogger(__name__)
+
+
+async def seed_admin_user():
+    """Erstellt den Standard-Admin-Benutzer, falls keiner existiert."""
+    from app.models.user import User
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(User).where(User.username == settings.auth.default_admin_username)
+        )
+        if result.scalar_one_or_none():
+            logger.info("Admin-Benutzer existiert bereits.")
+            return
+
+        admin = User(
+            username=settings.auth.default_admin_username,
+            email=f"{settings.auth.default_admin_username}@atlas.local",
+            hashed_password=hash_password(settings.auth.default_admin_password),
+            full_name="Administrator",
+            is_admin=True,
+            is_active=True,
+        )
+        session.add(admin)
+        await session.commit()
+        logger.info(f"Admin-Benutzer '{settings.auth.default_admin_username}' wurde erstellt.")
 
 
 @asynccontextmanager
@@ -29,6 +56,9 @@ async def lifespan(app: FastAPI):
     # Datenbank-Tabellen erstellen (nur bei Erststart, danach Alembic nutzen)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Admin-Benutzer anlegen, falls keiner existiert
+    await seed_admin_user()
 
     logger.info("Atlas RAG System bereit.")
     yield

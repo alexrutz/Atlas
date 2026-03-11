@@ -13,9 +13,10 @@ interface AuthState {
   login: (username: string, password: string) => Promise<void>
   logout: () => void
   loadFromStorage: () => void
+  refreshAccessToken: () => Promise<boolean>
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   refreshToken: null,
@@ -44,7 +45,36 @@ export const useAuthStore = create<AuthState>((set) => ({
     const refreshToken = localStorage.getItem('atlas_refresh_token')
     const userStr = localStorage.getItem('atlas_user')
     if (token && userStr) {
-      set({ token, refreshToken, user: JSON.parse(userStr) })
+      try {
+        set({ token, refreshToken, user: JSON.parse(userStr) })
+      } catch {
+        localStorage.removeItem('atlas_token')
+        localStorage.removeItem('atlas_refresh_token')
+        localStorage.removeItem('atlas_user')
+      }
+    }
+  },
+
+  refreshAccessToken: async () => {
+    const { refreshToken } = get()
+    if (!refreshToken) return false
+    try {
+      const response = await authApi.refresh(refreshToken)
+      localStorage.setItem('atlas_token', response.access_token)
+      localStorage.setItem('atlas_refresh_token', response.refresh_token)
+      localStorage.setItem('atlas_user', JSON.stringify(response.user))
+      set({
+        user: response.user,
+        token: response.access_token,
+        refreshToken: response.refresh_token,
+      })
+      return true
+    } catch {
+      get().logout()
+      return false
     }
   },
 }))
+
+// Token beim App-Start aus localStorage laden
+useAuthStore.getState().loadFromStorage()
