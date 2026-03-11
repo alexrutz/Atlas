@@ -108,6 +108,22 @@ class ChunkingConfig(BaseModel):
     separators: list[str] = ["\n\n", "\n", ". ", " "]
 
 
+class QueryEnrichmentConfig(BaseModel):
+    enabled: bool = True
+    prompt_template: str = (
+        "Du erhältst eine Benutzeranfrage und eine Liste von Glossar-Einträgen bzw. Kontext-Beschreibungen "
+        "aus Firmendokumenten. Deine Aufgabe: Erweitere die Anfrage um relevante Fachbegriffe, Abkürzungen "
+        "oder Variablennamen aus dem Glossar, die für die Suche hilfreich sein könnten.\n\n"
+        "WICHTIG:\n"
+        "- Gib NUR die erweiterte Suchanfrage zurück, KEINE Erklärungen\n"
+        "- Behalte die ursprüngliche Frage bei und ergänze nur relevante Begriffe\n"
+        "- Wenn kein Glossar-Eintrag relevant ist, gib die ursprüngliche Frage unverändert zurück\n\n"
+        "GLOSSAR UND KONTEXT:\n{context}\n\n"
+        "URSPRÜNGLICHE ANFRAGE: {query}\n\n"
+        "ERWEITERTE SUCHANFRAGE:"
+    )
+
+
 class RetrievalConfig(BaseModel):
     top_k: int = 10
     rerank: bool = True
@@ -116,6 +132,7 @@ class RetrievalConfig(BaseModel):
     similarity_threshold: float = 0.3
     hybrid_search: bool = True
     hybrid_alpha: float = 0.7
+    query_enrichment: QueryEnrichmentConfig = QueryEnrichmentConfig()
 
 
 class DocumentsConfig(BaseModel):

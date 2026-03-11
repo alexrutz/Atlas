@@ -3,9 +3,10 @@ RAG Pipeline - Orchestriert den gesamten Frage-Antwort-Prozess.
 
 Dies ist die zentrale Komponente, die alle Services zusammenführt:
 1. Berechtigungsprüfung
-2. Retrieval (Hybrid-Suche)
-3. LLM-Prompt-Erstellung
-4. Antwort-Generierung
+2. Query-Anreicherung (Glossar/Kontext → erweiterte Suchanfrage)
+3. Retrieval (Hybrid-Suche mit angereicherter Query)
+4. LLM-Prompt-Erstellung
+5. Antwort-Generierung
 """
 
 import logging
@@ -20,6 +21,7 @@ from app.models.collection import GroupCollectionAccess
 from app.models.group import UserGroup
 from app.services.retrieval_service import RetrievalService
 from app.services.llm_service import LLMService
+from app.services.query_enrichment_service import QueryEnrichmentService
 from app.schemas.chat import ChatResponse, SourceChunk
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ class RAGPipeline:
         self.db = db
         self.retrieval = RetrievalService(db)
         self.llm = LLMService()
+        self.query_enrichment = QueryEnrichmentService(db)
 
     async def query(
         self,
@@ -74,9 +77,14 @@ class RAGPipeline:
                 sources=[],
             )
 
-        # 2. Retrieval - relevante Chunks suchen
+        # 2. Query-Anreicherung - Suchanfrage mit Glossar/Kontext erweitern
+        enriched_query = await self.query_enrichment.enrich_query(
+            query=question, collection_ids=search_ids,
+        )
+
+        # 3. Retrieval - relevante Chunks suchen (mit angereicherter Query)
         logger.info(f"Suche in Collections: {search_ids}")
-        results = await self.retrieval.search(query=question, collection_ids=search_ids)
+        results = await self.retrieval.search(query=enriched_query, collection_ids=search_ids)
 
         if not results:
             return ChatResponse(
@@ -85,7 +93,7 @@ class RAGPipeline:
                 sources=[],
             )
 
-        # 3. LLM-Prompt bauen
+        # 4. LLM-Prompt bauen (mit Original-Frage, nicht angereicherter Query)
         contexts = [
             {
                 "content": r.content,
@@ -96,10 +104,10 @@ class RAGPipeline:
         ]
         prompt = self.llm.build_rag_prompt(question, contexts)
 
-        # 4. Antwort generieren
+        # 5. Antwort generieren
         answer = await self.llm.generate(prompt)
 
-        # 5. Konversation speichern
+        # 6. Konversation speichern
         conv_id = await self._save_to_conversation(
             user=user,
             conversation_id=conversation_id,
@@ -109,7 +117,7 @@ class RAGPipeline:
             search_ids=search_ids,
         )
 
-        # 6. Response zusammenbauen
+        # 7. Response zusammenbauen
         sources = [
             SourceChunk(
                 chunk_id=r.chunk_id,
