@@ -3,7 +3,7 @@ RAG Pipeline - Orchestriert den gesamten Frage-Antwort-Prozess.
 
 Dies ist die zentrale Komponente, die alle Services zusammenführt:
 1. Berechtigungsprüfung
-2. Query-Anreicherung (Glossar/Kontext → erweiterte Suchanfrage)
+2. Query-Anreicherung (Kontext → erweiterte Suchanfrage)
 3. Retrieval (Hybrid-Suche mit angereicherter Query)
 4. LLM-Prompt-Erstellung
 5. Antwort-Generierung
@@ -77,7 +77,7 @@ class RAGPipeline:
                 sources=[],
             )
 
-        # 2. Query-Anreicherung - Suchanfrage mit Glossar/Kontext erweitern
+        # 2. Query-Anreicherung - Suchanfrage mit Kontext erweitern
         enriched_query = await self.query_enrichment.enrich_query(
             query=question, collection_ids=search_ids,
         )

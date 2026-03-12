@@ -1,23 +1,20 @@
 /**
- * DocumentsPage - Dokumentenverwaltung mit Upload, Kontext-Editor und Glossar.
+ * DocumentsPage - Dokumentenverwaltung mit Upload.
  *
  * Hier können Benutzer:
  * - Dokumente zu Collections hochladen
- * - Kontext-Beschreibungen hinzufügen (WICHTIG für Context-Enriched Embedding)
- * - Glossar-Einträge verwalten
  * - Den Verarbeitungsstatus einsehen
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { collectionsApi, documentsApi } from '../services/api'
-import type { Collection, Document as DocType, GlossaryEntry } from '../types'
+import type { Collection, Document as DocType } from '../types'
 
 export default function DocumentsPage() {
   const [collections, setCollections] = useState<Collection[]>([])
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null)
   const [documents, setDocuments] = useState<DocType[]>([])
-  const [glossary, setGlossary] = useState<GlossaryEntry[]>([])
 
   const loadCollections = useCallback(async () => {
     const data = await collectionsApi.list()
@@ -28,19 +25,15 @@ export default function DocumentsPage() {
     loadCollections()
   }, [loadCollections])
 
-  const loadDocumentsAndGlossary = useCallback(async () => {
+  const loadDocuments = useCallback(async () => {
     if (!selectedCollection) return
-    const [docs, gl] = await Promise.all([
-      documentsApi.list(selectedCollection.id),
-      collectionsApi.getGlossary(selectedCollection.id),
-    ])
+    const docs = await documentsApi.list(selectedCollection.id)
     setDocuments(docs)
-    setGlossary(gl)
   }, [selectedCollection])
 
   useEffect(() => {
-    loadDocumentsAndGlossary()
-  }, [loadDocumentsAndGlossary])
+    loadDocuments()
+  }, [loadDocuments])
 
   return (
     <div className="flex h-full">
@@ -80,20 +73,13 @@ export default function DocumentsPage() {
             {/* Upload-Bereich */}
             <UploadSection
               collectionId={selectedCollection.id}
-              onUploadComplete={() => { loadDocumentsAndGlossary(); loadCollections() }}
+              onUploadComplete={() => { loadDocuments(); loadCollections() }}
             />
 
             {/* Dokumentenliste */}
             <DocumentList
               documents={documents}
-              onRefresh={loadDocumentsAndGlossary}
-            />
-
-            {/* Glossar */}
-            <GlossarySection
-              collectionId={selectedCollection.id}
-              glossary={glossary}
-              onRefresh={loadDocumentsAndGlossary}
+              onRefresh={loadDocuments}
             />
           </div>
         )}
@@ -110,7 +96,6 @@ function UploadSection({ collectionId, onUploadComplete }: {
   collectionId: number
   onUploadComplete: () => void
 }) {
-  const [contextDescription, setContextDescription] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
@@ -129,11 +114,9 @@ function UploadSection({ collectionId, onUploadComplete }: {
         await documentsApi.upload(
           collectionId,
           file,
-          contextDescription || undefined,
           (percent) => setUploadProgress(percent),
         )
         setUploadSuccess(`"${file.name}" erfolgreich hochgeladen. Verarbeitung läuft...`)
-        setContextDescription('')
         onUploadComplete()
       } catch (err: unknown) {
         const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -143,7 +126,7 @@ function UploadSection({ collectionId, onUploadComplete }: {
         setUploadProgress(0)
       }
     }
-  }, [collectionId, contextDescription, onUploadComplete])
+  }, [collectionId, onUploadComplete])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -207,23 +190,6 @@ function UploadSection({ collectionId, onUploadComplete }: {
             </p>
           </>
         )}
-      </div>
-
-      <div className="mt-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-        <p className="text-sm font-medium text-yellow-800">
-          Kontext-Beschreibung (empfohlen)
-        </p>
-        <p className="text-xs text-yellow-700 mt-1">
-          Beschreiben Sie den Inhalt des Dokuments und erklären Sie Fachbegriffe
-          und Abkürzungen. Dies verbessert die Suchqualität erheblich.
-        </p>
-        <textarea
-          value={contextDescription}
-          onChange={(e) => setContextDescription(e.target.value)}
-          placeholder="z.B.: Dieses Dokument ist die DIN EN 1090-2 Norm. EXC = Ausführungsklasse, WPS = Schweißanweisung..."
-          className="w-full mt-2 p-2 border rounded text-sm resize-y min-h-[80px]"
-          rows={3}
-        />
       </div>
     </section>
   )
@@ -319,221 +285,6 @@ function DocumentList({ documents, onRefresh }: {
           </div>
         ))}
       </div>
-    </section>
-  )
-}
-
-// =============================================================================
-// Glossary Section
-// =============================================================================
-
-interface GlossaryFormData {
-  term: string
-  definition: string
-  abbreviation: string
-}
-
-const emptyGlossaryForm: GlossaryFormData = { term: '', definition: '', abbreviation: '' }
-
-function GlossarySection({ collectionId, glossary, onRefresh }: {
-  collectionId: number
-  glossary: GlossaryEntry[]
-  onRefresh: () => void
-}) {
-  const [showForm, setShowForm] = useState(false)
-  const [editingEntry, setEditingEntry] = useState<GlossaryEntry | null>(null)
-  const [formData, setFormData] = useState<GlossaryFormData>(emptyGlossaryForm)
-  const [saving, setSaving] = useState(false)
-  const [extracting, setExtracting] = useState(false)
-  const [error, setError] = useState('')
-
-  const openCreate = () => {
-    setEditingEntry(null)
-    setFormData(emptyGlossaryForm)
-    setError('')
-    setShowForm(true)
-  }
-
-  const openEdit = (entry: GlossaryEntry) => {
-    setEditingEntry(entry)
-    setFormData({
-      term: entry.term,
-      definition: entry.definition,
-      abbreviation: entry.abbreviation || '',
-    })
-    setError('')
-    setShowForm(true)
-  }
-
-  const handleSave = async () => {
-    if (!formData.term || !formData.definition) {
-      setError('Begriff und Definition sind erforderlich')
-      return
-    }
-    setSaving(true)
-    setError('')
-    try {
-      const data = {
-        term: formData.term,
-        definition: formData.definition,
-        abbreviation: formData.abbreviation || undefined,
-      }
-      if (editingEntry) {
-        await collectionsApi.updateGlossaryEntry(collectionId, editingEntry.id, data)
-      } else {
-        await collectionsApi.addGlossaryEntry(collectionId, data)
-      }
-      setShowForm(false)
-      onRefresh()
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Fehler beim Speichern')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleDelete = async (entry: GlossaryEntry) => {
-    if (!confirm(`Glossar-Eintrag "${entry.term}" wirklich löschen?`)) return
-    try {
-      await collectionsApi.deleteGlossaryEntry(collectionId, entry.id)
-      onRefresh()
-    } catch {
-      setError('Fehler beim Löschen')
-    }
-  }
-
-  const handleAutoExtract = async () => {
-    if (!confirm('Automatische Glossar-Extraktion starten? Dies kann einige Sekunden dauern.')) return
-    setExtracting(true)
-    setError('')
-    try {
-      await collectionsApi.autoExtractGlossary(collectionId)
-      onRefresh()
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Fehler bei der automatischen Extraktion')
-    } finally {
-      setExtracting(false)
-    }
-  }
-
-  return (
-    <section>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold">Glossar ({glossary.length} Einträge)</h3>
-        <div className="flex gap-2">
-          <button
-            onClick={handleAutoExtract}
-            disabled={extracting}
-            className="px-3 py-1.5 border border-atlas-300 text-atlas-700 rounded text-xs hover:bg-atlas-50 disabled:opacity-50"
-          >
-            {extracting ? 'Extrahiere...' : 'Auto-Extraktion'}
-          </button>
-          <button
-            onClick={openCreate}
-            className="px-3 py-1.5 bg-atlas-600 text-white rounded text-xs hover:bg-atlas-700"
-          >
-            Eintrag hinzufügen
-          </button>
-        </div>
-      </div>
-
-      <p className="text-xs text-gray-500 mb-3">
-        Definieren Sie Fachbegriffe und Abkürzungen, die in den Dokumenten dieser Collection vorkommen.
-        Diese werden beim Embedding automatisch als Kontext hinzugefügt.
-      </p>
-
-      {error && <div className="bg-red-50 text-red-600 p-3 rounded text-sm mb-3">{error}</div>}
-
-      {glossary.length === 0 && (
-        <p className="text-sm text-gray-400">Noch keine Glossar-Einträge vorhanden.</p>
-      )}
-
-      <div className="space-y-1">
-        {glossary.map((entry) => (
-          <div key={entry.id} className="flex items-center gap-2 p-2 bg-white border rounded text-sm group">
-            <div className="flex-1 flex items-center gap-2">
-              <span className="font-mono font-medium text-atlas-700">{entry.term}</span>
-              {entry.abbreviation && <span className="text-gray-400">({entry.abbreviation})</span>}
-              <span className="text-gray-600">&mdash; {entry.definition}</span>
-            </div>
-            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
-              <button
-                onClick={() => openEdit(entry)}
-                className="text-atlas-600 hover:text-atlas-800 text-xs"
-              >
-                Bearbeiten
-              </button>
-              <button
-                onClick={() => handleDelete(entry)}
-                className="text-red-500 hover:text-red-700 text-xs"
-              >
-                Löschen
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Glossar-Formular Dialog */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4">
-              {editingEntry ? 'Glossar-Eintrag bearbeiten' : 'Neuer Glossar-Eintrag'}
-            </h3>
-            {error && <div className="bg-red-50 text-red-600 p-3 rounded text-sm mb-4">{error}</div>}
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Begriff</label>
-                <input
-                  type="text"
-                  value={formData.term}
-                  onChange={(e) => setFormData({ ...formData, term: e.target.value })}
-                  placeholder="z.B. Ausführungsklasse"
-                  className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-atlas-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Abkürzung (optional)</label>
-                <input
-                  type="text"
-                  value={formData.abbreviation}
-                  onChange={(e) => setFormData({ ...formData, abbreviation: e.target.value })}
-                  placeholder="z.B. EXC"
-                  className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-atlas-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Definition</label>
-                <textarea
-                  value={formData.definition}
-                  onChange={(e) => setFormData({ ...formData, definition: e.target.value })}
-                  placeholder="Kurze Erklärung des Begriffs..."
-                  rows={3}
-                  className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-atlas-500 outline-none resize-none"
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 mt-6">
-              <button
-                onClick={() => setShowForm(false)}
-                className="px-4 py-2 border rounded text-sm text-gray-600 hover:bg-gray-50"
-              >
-                Abbrechen
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-4 py-2 bg-atlas-600 text-white rounded text-sm hover:bg-atlas-700 disabled:opacity-50"
-              >
-                {saving ? 'Speichern...' : 'Speichern'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   )
 }

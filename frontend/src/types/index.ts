@@ -69,19 +69,9 @@ export interface Document {
   original_name: string
   file_type: string
   file_size_bytes: number
-  context_description: string | null
   processing_status: 'pending' | 'processing' | 'completed' | 'error'
   processing_error: string | null
   chunk_count: number
-  created_at: string
-}
-
-// --- Glossar ---
-export interface GlossaryEntry {
-  id: number
-  term: string
-  definition: string
-  abbreviation: string | null
   created_at: string
 }
 

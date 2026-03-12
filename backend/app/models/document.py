@@ -20,9 +20,6 @@ class Document(Base):
     file_type: Mapped[str] = mapped_column(String(20), nullable=False)
     file_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
-    # Kontext-Informationen für Context-Enriched Embedding
-    context_description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    glossary: Mapped[dict] = mapped_column(JSONB, default=dict)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
     # Status
