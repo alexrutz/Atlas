@@ -35,7 +35,7 @@ database:
 # pgvector Konfiguration
 # -----------------------------------------------------------------------------
 vector:
-  dimensions: 1024                    # Dimensionen des Embedding-Modells
+  dimensions: 768                     # Dimensionen des Embedding-Modells (nomic-embed-text: 768)
   index_type: "ivfflat"              # ivfflat oder hnsw
   distance_metric: "cosine"           # cosine, l2, inner_product
   ivfflat_lists: 100                  # Anzahl der IVFFlat Listen (bei ivfflat)
