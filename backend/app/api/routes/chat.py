@@ -139,6 +139,7 @@ async def get_conversation_messages(
             role=msg.role,
             content=msg.content,
             sources=sources,
+            enriched_query=msg.metadata_.get("enriched_query") if msg.metadata_ else None,
             created_at=msg.created_at,
         ))
     return response
@@ -233,6 +234,13 @@ async def ask_question_stream(
         async def event_stream():
             full_answer = ""
             try:
+                # Angereicherte Query senden
+                enriched_query_data = json.dumps({
+                    "type": "enriched_query",
+                    "enriched_query": enriched_query,
+                })
+                yield f"data: {enriched_query_data}\n\n"
+
                 # Quellen zuerst senden
                 sources_data = json.dumps({
                     "type": "sources",
@@ -254,6 +262,7 @@ async def ask_question_stream(
                     answer=full_answer,
                     results=results,
                     search_ids=search_ids,
+                    enriched_query=enriched_query,
                 )
                 await db.commit()
 

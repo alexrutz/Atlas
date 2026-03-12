@@ -18,7 +18,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useChatStore } from '../stores/chatStore'
+import { settingsApi } from '../services/api'
 import type { Collection, SourceChunk } from '../types'
+import type { OllamaModel, ModelConfig } from '../services/api'
 
 function SourcesPanel({ sources }: { sources: SourceChunk[] }) {
   const [expanded, setExpanded] = useState(false)
@@ -124,13 +126,40 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [showGlobalContext, setShowGlobalContext] = useState(false)
   const [globalContextDraft, setGlobalContextDraft] = useState('')
+  const [showModelConfig, setShowModelConfig] = useState(false)
+  const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null)
+  const [availableModels, setAvailableModels] = useState<OllamaModel[]>([])
+  const [modelSaving, setModelSaving] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadCollections()
     loadConversations()
     loadGlobalContext()
+    settingsApi.getModelConfig().then(setModelConfig).catch(() => {})
   }, [loadCollections, loadConversations, loadGlobalContext])
+
+  const handleToggleModelConfig = useCallback(() => {
+    if (!showModelConfig && availableModels.length === 0) {
+      settingsApi.getAvailableModels()
+        .then((data) => setAvailableModels(data.models))
+        .catch(() => {})
+    }
+    setShowModelConfig(!showModelConfig)
+  }, [showModelConfig, availableModels.length])
+
+  const handleModelChange = useCallback(async (field: 'llm_model' | 'embedding_model', value: string) => {
+    if (!modelConfig) return
+    setModelSaving(true)
+    try {
+      const updated = await settingsApi.updateModelConfig({ [field]: value })
+      setModelConfig(updated)
+    } catch {
+      // Ignore - user may not have admin rights
+    } finally {
+      setModelSaving(false)
+    }
+  }, [modelConfig])
 
   const handleSaveGlobalContext = useCallback(() => {
     updateGlobalContext(globalContextDraft)
@@ -227,6 +256,66 @@ export default function ChatPage() {
           )}
         </div>
 
+        {/* Modell-Konfiguration */}
+        <div className="mb-3 pb-3 border-b border-gray-200">
+          <button
+            onClick={handleToggleModelConfig}
+            className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-atlas-600 uppercase w-full"
+          >
+            <span className={`inline-block transition-transform text-[10px] ${showModelConfig ? 'rotate-90' : ''}`}>&#9654;</span>
+            Modelle
+            {modelConfig && (
+              <span className="ml-auto text-[10px] normal-case font-normal text-gray-400 truncate max-w-[120px]">
+                {modelConfig.llm_model}
+              </span>
+            )}
+          </button>
+          {showModelConfig && modelConfig && (
+            <div className="mt-2 space-y-2">
+              <div>
+                <label className="text-[10px] font-medium text-gray-500 block mb-0.5">Sprachmodell (LLM)</label>
+                <select
+                  value={modelConfig.llm_model}
+                  onChange={(e) => handleModelChange('llm_model', e.target.value)}
+                  disabled={modelSaving}
+                  className="w-full text-xs p-1.5 border rounded focus:ring-1 focus:ring-atlas-500 outline-none bg-white"
+                >
+                  {/* Current value always available */}
+                  {!availableModels.some(m => m.name === modelConfig.llm_model) && (
+                    <option value={modelConfig.llm_model}>{modelConfig.llm_model}</option>
+                  )}
+                  {availableModels.map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name} {m.parameter_size ? `(${m.parameter_size})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-medium text-gray-500 block mb-0.5">Embedding-Modell</label>
+                <select
+                  value={modelConfig.embedding_model}
+                  onChange={(e) => handleModelChange('embedding_model', e.target.value)}
+                  disabled={modelSaving}
+                  className="w-full text-xs p-1.5 border rounded focus:ring-1 focus:ring-atlas-500 outline-none bg-white"
+                >
+                  {!availableModels.some(m => m.name === modelConfig.embedding_model) && (
+                    <option value={modelConfig.embedding_model}>{modelConfig.embedding_model}</option>
+                  )}
+                  {availableModels.map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name} {m.parameter_size ? `(${m.parameter_size})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {modelSaving && (
+                <p className="text-[10px] text-atlas-600">Speichern...</p>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Collections */}
         <h3 className="font-semibold text-sm text-gray-500 uppercase mb-3">Collections</h3>
         {collections.length === 0 && (
@@ -269,13 +358,24 @@ export default function ChatPage() {
           )}
           {messages.map((msg) => (
             <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-3xl rounded-lg p-4 ${
+              <div className={`relative group max-w-3xl rounded-lg p-4 ${
                 msg.role === 'user'
                   ? 'bg-atlas-600 text-white'
                   : 'bg-white border shadow-sm'
               }`}>
                 {msg.role === 'user' ? (
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  <>
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                    {msg.enriched_query && msg.enriched_query !== msg.content && (
+                      <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block z-50 max-w-md">
+                        <div className="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg">
+                          <span className="font-semibold text-gray-300 block mb-1">Angereicherte Query:</span>
+                          <span className="whitespace-pre-wrap">{msg.enriched_query}</span>
+                        </div>
+                        <div className="w-3 h-3 bg-gray-900 rotate-45 absolute -bottom-1.5 right-4" />
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-li:my-0">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
