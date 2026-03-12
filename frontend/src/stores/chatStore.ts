@@ -3,7 +3,7 @@
  */
 
 import { create } from 'zustand'
-import type { Conversation, Message, Collection, ChatResponse, SourceChunk } from '../types'
+import type { Conversation, Message, Collection, ChatResponse, SourceChunk, RagChunk } from '../types'
 import { chatApi, collectionsApi, settingsApi } from '../services/api'
 
 interface ChatState {
@@ -140,6 +140,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let sources: SourceChunk[] = []
       let conversationId = currentConversationId
       let enrichedQuery: string | null = null
+      let ragChunks: RagChunk[] = []
 
       while (true) {
         const { done, value } = await reader.read()
@@ -159,8 +160,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (event.type === 'token') {
               fullContent += event.content
               set({ streamingContent: fullContent })
-            } else if (event.type === 'enriched_query') {
+            } else if (event.type === 'debug_info') {
               enrichedQuery = event.enriched_query
+              ragChunks = event.rag_chunks || []
               // Attach enriched_query to the user message
               set((state) => ({
                 messages: state.messages.map((m) =>
@@ -186,6 +188,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         role: 'assistant',
         content: fullContent,
         sources,
+        enriched_query: enrichedQuery,
+        rag_chunks: ragChunks,
         created_at: new Date().toISOString(),
       }
 

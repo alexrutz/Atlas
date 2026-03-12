@@ -35,12 +35,21 @@ class ConversationResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RagChunk(BaseModel):
+    document_name: str
+    collection_name: str
+    page_number: int | None
+    content: str
+    similarity_score: float
+
+
 class MessageResponse(BaseModel):
     id: int
     role: str
     content: str
     sources: list[SourceChunk] = []
     enriched_query: str | None = None
+    rag_chunks: list[RagChunk] = []
     created_at: datetime
 
     model_config = {"from_attributes": True}
