@@ -15,7 +15,8 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.core.database import engine, Base, async_session
 from app.core.security import hash_password
-from app.api.routes import auth, users, groups, collections, documents, chat, settings
+from app.api.routes import auth, users, groups, collections, documents, chat
+from app.api.routes import settings as settings_router
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ app.include_router(groups.router, prefix="/api/groups", tags=["Gruppen"])
 app.include_router(collections.router, prefix="/api/collections", tags=["Collections"])
 app.include_router(documents.router, prefix="/api", tags=["Dokumente"])
 app.include_router(chat.router, prefix="/api", tags=["Chat"])
-app.include_router(settings.router, prefix="/api/settings", tags=["Einstellungen"])
+app.include_router(settings_router.router, prefix="/api/settings", tags=["Einstellungen"])
 
 
 @app.get("/api/health")
