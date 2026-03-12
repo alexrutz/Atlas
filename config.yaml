@@ -73,7 +73,6 @@ embedding:
   provider: "ollama"                  # ollama, sentence-transformers oder custom
   base_url: "http://ollama:11434"     # Embedding API URL
   model: "nomic-embed-text"           # Embedding-Modell
-  dimensions: 1024                    # Muss mit vector.dimensions übereinstimmen
   batch_size: 32                      # Batch-Größe für Embedding-Berechnung
   max_retries: 3                      # Wiederholungsversuche bei Fehlern
   timeout: 60                         # Timeout in Sekunden
