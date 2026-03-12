@@ -205,7 +205,13 @@ async def ask_question_stream(
 
         results = await pipeline.retrieval.search(query=enriched_query, collection_ids=search_ids)
 
+        # Fallback: Bei leeren Ergebnissen mit Original-Query erneut suchen
+        if not results and enriched_query != request.question:
+            logger.info("Angereicherte Query lieferte keine Ergebnisse, Fallback auf Original-Query")
+            results = await pipeline.retrieval.search(query=request.question, collection_ids=search_ids)
+
         if not results:
+            logger.warning(f"Keine Ergebnisse für Query '{request.question}' in Collections {search_ids}")
             async def no_results():
                 data = json.dumps({"type": "error", "content": "Keine relevanten Informationen gefunden."})
                 yield f"data: {data}\n\n"
