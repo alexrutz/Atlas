@@ -140,6 +140,7 @@ async def get_conversation_messages(
             content=msg.content,
             sources=sources,
             enriched_query=msg.metadata_.get("enriched_query") if msg.metadata_ else None,
+            rag_chunks=msg.metadata_.get("rag_chunks", []) if msg.metadata_ else [],
             created_at=msg.created_at,
         ))
     return response
@@ -237,15 +238,28 @@ async def ask_question_stream(
         ]
         prompt = pipeline.llm.build_rag_prompt(request.question, contexts)
 
+        # Vollständige Chunk-Kontexte für Debug-Anzeige aufbauen
+        rag_chunks = [
+            {
+                "document_name": r.document_name,
+                "collection_name": r.collection_name,
+                "page_number": r.page_number,
+                "content": r.content,
+                "similarity_score": r.similarity_score,
+            }
+            for r in results
+        ]
+
         async def event_stream():
             full_answer = ""
             try:
-                # Angereicherte Query senden
-                enriched_query_data = json.dumps({
-                    "type": "enriched_query",
+                # Enriched Query + RAG-Kontext senden (für Debug-Panel)
+                debug_data = json.dumps({
+                    "type": "debug_info",
                     "enriched_query": enriched_query,
+                    "rag_chunks": rag_chunks,
                 })
-                yield f"data: {enriched_query_data}\n\n"
+                yield f"data: {debug_data}\n\n"
 
                 # Quellen zuerst senden
                 sources_data = json.dumps({
@@ -269,6 +283,7 @@ async def ask_question_stream(
                     results=results,
                     search_ids=search_ids,
                     enriched_query=enriched_query,
+                    rag_chunks=rag_chunks,
                 )
                 await db.commit()
 

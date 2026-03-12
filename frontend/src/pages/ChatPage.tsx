@@ -7,7 +7,7 @@
  * │                │               │                     │
  * │ > Konv 1       │ [x] Normen    │  Frage...           │
  * │   Konv 2       │ [x] Daten     │  Antwort (Markdown) │
- * │   Konv 3       │ [ ] Anfragen  │  [Quellen klappbar] │
+ * │   Konv 3       │ [ ] Anfragen  │  [Debug aufklappbar]│
  * │                │               │                     │
  * │ [+ Neuer Chat] │               │ ┌─────────────────┐ │
  * │                │               │ │ Eingabefeld     │ │
@@ -19,8 +19,12 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useChatStore } from '../stores/chatStore'
 import { settingsApi } from '../services/api'
-import type { Collection, SourceChunk } from '../types'
+import type { SourceChunk, RagChunk } from '../types'
 import type { OllamaModel, ModelConfig } from '../services/api'
+
+// =============================================================================
+// SourcesPanel - Quellen anzeigen
+// =============================================================================
 
 function SourcesPanel({ sources }: { sources: SourceChunk[] }) {
   const [expanded, setExpanded] = useState(false)
@@ -70,48 +74,116 @@ function SourcesPanel({ sources }: { sources: SourceChunk[] }) {
   )
 }
 
-function CollectionContextField({ collection, onSave }: { collection: Collection; onSave: (id: number, text: string) => void }) {
-  const [editing, setEditing] = useState(false)
-  const [value, setValue] = useState(collection.context_text || '')
+// =============================================================================
+// DebugPanel - Query + RAG-Chunks unterhalb einer Nachricht
+// =============================================================================
 
-  const handleSave = () => {
-    onSave(collection.id, value)
-    setEditing(false)
-  }
+function DebugPanel({
+  enrichedQuery,
+  originalQuery,
+  ragChunks,
+}: {
+  enrichedQuery?: string | null
+  originalQuery?: string
+  ragChunks?: RagChunk[]
+}) {
+  const [open, setOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<'query' | 'chunks'>('query')
 
-  if (!editing) {
-    return (
-      <button
-        onClick={() => setEditing(true)}
-        className="text-[10px] text-gray-400 hover:text-atlas-600 mt-0.5 truncate block w-full text-left"
-        title={collection.context_text || 'Kontext hinzufügen...'}
-      >
-        {collection.context_text ? `Kontext: ${collection.context_text.slice(0, 30)}...` : '+ Kontext'}
-      </button>
-    )
-  }
+  const hasQuery = !!enrichedQuery || !!originalQuery
+  const hasChunks = ragChunks && ragChunks.length > 0
+  if (!hasQuery && !hasChunks) return null
 
   return (
-    <div className="mt-1" onClick={(e) => e.stopPropagation()}>
-      <textarea
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="z.B. L1 beschreibt die Kühlerlänge, B2 ist die Breite des Gehäuses..."
-        className="w-full text-xs p-1.5 border rounded resize-none focus:ring-1 focus:ring-atlas-500 outline-none"
-        rows={3}
-        autoFocus
-      />
-      <div className="flex gap-1 mt-1">
-        <button onClick={handleSave} className="text-[10px] px-2 py-0.5 bg-atlas-600 text-white rounded hover:bg-atlas-700">
-          Speichern
-        </button>
-        <button onClick={() => setEditing(false)} className="text-[10px] px-2 py-0.5 bg-gray-200 rounded hover:bg-gray-300">
-          Abbrechen
-        </button>
-      </div>
+    <div className="mt-1">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 transition"
+        title="RAG-Debug anzeigen"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+        </svg>
+        <span>{open ? 'Debug ausblenden' : 'Debug'}</span>
+      </button>
+      {open && (
+        <div className="mt-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs overflow-hidden">
+          {/* Tabs */}
+          <div className="flex border-b border-gray-200 bg-gray-100">
+            {hasQuery && (
+              <button
+                onClick={() => setActiveTab('query')}
+                className={`px-3 py-1.5 text-xs font-medium transition ${
+                  activeTab === 'query'
+                    ? 'text-atlas-700 border-b-2 border-atlas-500 bg-white'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Query
+              </button>
+            )}
+            {hasChunks && (
+              <button
+                onClick={() => setActiveTab('chunks')}
+                className={`px-3 py-1.5 text-xs font-medium transition ${
+                  activeTab === 'chunks'
+                    ? 'text-atlas-700 border-b-2 border-atlas-500 bg-white'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Chunks ({ragChunks!.length})
+              </button>
+            )}
+          </div>
+
+          {/* Tab Content */}
+          <div className="p-3 max-h-80 overflow-y-auto">
+            {activeTab === 'query' && hasQuery && (
+              <div className="space-y-2">
+                {originalQuery && (
+                  <div>
+                    <span className="font-semibold text-gray-500 block mb-0.5">Original-Query:</span>
+                    <p className="bg-white border rounded p-2 whitespace-pre-wrap text-gray-700">{originalQuery}</p>
+                  </div>
+                )}
+                {enrichedQuery && (
+                  <div>
+                    <span className="font-semibold text-gray-500 block mb-0.5">
+                      Angereicherte Query{enrichedQuery === originalQuery ? ' (identisch)' : ''}:
+                    </span>
+                    <p className={`bg-white border rounded p-2 whitespace-pre-wrap ${
+                      enrichedQuery !== originalQuery ? 'text-atlas-700 border-atlas-200 bg-atlas-50' : 'text-gray-700'
+                    }`}>{enrichedQuery}</p>
+                  </div>
+                )}
+              </div>
+            )}
+            {activeTab === 'chunks' && hasChunks && (
+              <div className="space-y-3">
+                {ragChunks!.map((chunk, i) => (
+                  <div key={i} className="bg-white border rounded p-2">
+                    <div className="flex items-center gap-2 mb-1 text-[10px]">
+                      <span className="bg-atlas-100 text-atlas-700 px-1.5 py-0.5 rounded font-bold">{i + 1}</span>
+                      <span className="font-medium text-gray-700">{chunk.document_name}</span>
+                      {chunk.page_number && <span className="text-gray-400">S. {chunk.page_number}</span>}
+                      <span className="text-gray-400">{chunk.collection_name}</span>
+                      <span className="ml-auto text-gray-400">{Math.round(chunk.similarity_score * 100)}%</span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-gray-600 text-[11px] leading-relaxed">{chunk.content}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
+// =============================================================================
+// ChatPage
+// =============================================================================
 
 export default function ChatPage() {
   const {
@@ -120,7 +192,7 @@ export default function ChatPage() {
     loadConversations, selectConversation,
     deleteConversation, loadCollections, toggleCollection,
     sendMessageStream, clearChat, loadGlobalContext,
-    updateGlobalContext, updateCollectionContext,
+    updateGlobalContext,
   } = useChatStore()
 
   const [input, setInput] = useState('')
@@ -175,6 +247,14 @@ export default function ChatPage() {
     const question = input
     setInput('')
     await sendMessageStream(question)
+  }
+
+  // Für das Debug-Panel: Original-Query der vorangehenden User-Nachricht finden
+  const getOriginalQuery = (msgIndex: number): string | undefined => {
+    if (messages[msgIndex]?.role === 'assistant' && msgIndex > 0 && messages[msgIndex - 1]?.role === 'user') {
+      return messages[msgIndex - 1].content
+    }
+    return undefined
   }
 
   return (
@@ -280,7 +360,6 @@ export default function ChatPage() {
                   disabled={modelSaving}
                   className="w-full text-xs p-1.5 border rounded focus:ring-1 focus:ring-atlas-500 outline-none bg-white"
                 >
-                  {/* Current value always available */}
                   {!availableModels.some(m => m.name === modelConfig.llm_model) && (
                     <option value={modelConfig.llm_model}>{modelConfig.llm_model}</option>
                   )}
@@ -333,9 +412,6 @@ export default function ChatPage() {
               <span className="text-sm truncate">{col.name}</span>
               <span className="text-xs text-gray-400 ml-auto shrink-0">{col.document_count}</span>
             </label>
-            <div className="ml-6">
-              <CollectionContextField collection={col} onSave={updateCollectionContext} />
-            </div>
           </div>
         ))}
       </div>
@@ -356,26 +432,15 @@ export default function ChatPage() {
               )}
             </div>
           )}
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`relative group max-w-3xl rounded-lg p-4 ${
+          {messages.map((msg, idx) => (
+            <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`max-w-3xl rounded-lg p-4 ${
                 msg.role === 'user'
                   ? 'bg-atlas-600 text-white'
                   : 'bg-white border shadow-sm'
               }`}>
                 {msg.role === 'user' ? (
-                  <>
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                    {msg.enriched_query && msg.enriched_query !== msg.content && (
-                      <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block z-50 max-w-md">
-                        <div className="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg">
-                          <span className="font-semibold text-gray-300 block mb-1">Angereicherte Query:</span>
-                          <span className="whitespace-pre-wrap">{msg.enriched_query}</span>
-                        </div>
-                        <div className="w-3 h-3 bg-gray-900 rotate-45 absolute -bottom-1.5 right-4" />
-                      </div>
-                    )}
-                  </>
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
                 ) : (
                   <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-li:my-0">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
@@ -383,6 +448,16 @@ export default function ChatPage() {
                 )}
                 <SourcesPanel sources={msg.sources} />
               </div>
+              {/* Debug-Panel unter jeder Assistenten-Nachricht */}
+              {msg.role === 'assistant' && (
+                <div className="max-w-3xl w-full">
+                  <DebugPanel
+                    enrichedQuery={msg.enriched_query}
+                    originalQuery={getOriginalQuery(idx)}
+                    ragChunks={msg.rag_chunks}
+                  />
+                </div>
+              )}
             </div>
           ))}
           {/* Streaming-Anzeige */}

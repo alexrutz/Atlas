@@ -83,12 +83,21 @@ export interface Conversation {
   message_count: number
 }
 
+export interface RagChunk {
+  document_name: string
+  collection_name: string
+  page_number: number | null
+  content: string
+  similarity_score: number
+}
+
 export interface Message {
   id: number
   role: 'user' | 'assistant'
   content: string
   sources: SourceChunk[]
   enriched_query?: string | null
+  rag_chunks?: RagChunk[]
   created_at: string
 }
 

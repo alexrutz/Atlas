@@ -114,6 +114,16 @@ class RAGPipeline:
         answer = await self.llm.generate(prompt)
 
         # 6. Konversation speichern
+        rag_chunks = [
+            {
+                "document_name": r.document_name,
+                "collection_name": r.collection_name,
+                "page_number": r.page_number,
+                "content": r.content,
+                "similarity_score": r.similarity_score,
+            }
+            for r in results
+        ]
         conv_id = await self._save_to_conversation(
             user=user,
             conversation_id=conversation_id,
@@ -122,6 +132,7 @@ class RAGPipeline:
             results=results,
             search_ids=search_ids,
             enriched_query=enriched_query,
+            rag_chunks=rag_chunks,
         )
 
         # 7. Response zusammenbauen
@@ -170,6 +181,7 @@ class RAGPipeline:
         self, user: User, conversation_id: int | None,
         question: str, answer: str, results, search_ids: list[int],
         enriched_query: str | None = None,
+        rag_chunks: list[dict] | None = None,
     ) -> int:
         """Speichert Frage und Antwort in der Konversation."""
         if conversation_id:
@@ -198,9 +210,13 @@ class RAGPipeline:
         self.db.add(user_msg)
 
         # Antwort speichern
+        assistant_metadata = {}
+        if rag_chunks:
+            assistant_metadata["rag_chunks"] = rag_chunks
         assistant_msg = Message(
             conversation_id=conv.id, role="assistant", content=answer,
             source_chunks=[r.chunk_id for r in results],
+            metadata_=assistant_metadata,
         )
         self.db.add(assistant_msg)
         await self.db.flush()

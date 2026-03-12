@@ -15,6 +15,8 @@ export default function DocumentsPage() {
   const [collections, setCollections] = useState<Collection[]>([])
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null)
   const [documents, setDocuments] = useState<DocType[]>([])
+  const [contextDraft, setContextDraft] = useState('')
+  const [contextSaving, setContextSaving] = useState(false)
 
   const loadCollections = useCallback(async () => {
     const data = await collectionsApi.list()
@@ -24,6 +26,12 @@ export default function DocumentsPage() {
   useEffect(() => {
     loadCollections()
   }, [loadCollections])
+
+  useEffect(() => {
+    if (selectedCollection) {
+      setContextDraft(selectedCollection.context_text || '')
+    }
+  }, [selectedCollection])
 
   const loadDocuments = useCallback(async () => {
     if (!selectedCollection) return
@@ -35,10 +43,24 @@ export default function DocumentsPage() {
     loadDocuments()
   }, [loadDocuments])
 
+  const handleSaveContext = useCallback(async () => {
+    if (!selectedCollection) return
+    setContextSaving(true)
+    try {
+      await collectionsApi.update(selectedCollection.id, { context_text: contextDraft })
+      setSelectedCollection({ ...selectedCollection, context_text: contextDraft })
+      setCollections((prev) => prev.map((c) =>
+        c.id === selectedCollection.id ? { ...c, context_text: contextDraft } : c
+      ))
+    } finally {
+      setContextSaving(false)
+    }
+  }, [selectedCollection, contextDraft])
+
   return (
     <div className="flex h-full">
       {/* Collection-Liste */}
-      <div className="w-64 border-r bg-white p-4 overflow-y-auto">
+      <div className="w-64 border-r bg-white p-4 overflow-y-auto shrink-0">
         <h3 className="font-semibold text-sm text-gray-500 uppercase mb-3">Collections</h3>
         {collections.length === 0 && (
           <p className="text-xs text-gray-400">Keine Collections vorhanden. Erstellen Sie eine im Admin-Panel.</p>
@@ -51,14 +73,17 @@ export default function DocumentsPage() {
               selectedCollection?.id === col.id ? 'bg-atlas-100 text-atlas-700' : 'hover:bg-gray-50'
             }`}
           >
-            <div className="font-medium text-sm">{col.name}</div>
+            <div className="flex items-center gap-1">
+              <span className="font-medium text-sm">{col.name}</span>
+              {col.context_text && <span className="w-1.5 h-1.5 rounded-full bg-atlas-500 shrink-0" />}
+            </div>
             <div className="text-xs text-gray-400">{col.document_count} Dokumente</div>
           </button>
         ))}
       </div>
 
-      {/* Hauptbereich */}
-      <div className="flex-1 p-6 overflow-y-auto">
+      {/* Hauptbereich: Dokumente */}
+      <div className="flex-1 p-6 overflow-y-auto min-w-0">
         {!selectedCollection ? (
           <div className="text-center text-gray-400 mt-20">
             Wählen Sie eine Collection aus der Liste.
@@ -84,6 +109,32 @@ export default function DocumentsPage() {
           </div>
         )}
       </div>
+
+      {/* Kontext-Spalte */}
+      {selectedCollection && (
+        <div className="w-80 border-l bg-gray-50 p-4 flex flex-col shrink-0">
+          <h3 className="font-semibold text-sm text-gray-500 uppercase mb-2">
+            Collection-Kontext
+          </h3>
+          <p className="text-xs text-gray-400 mb-3">
+            Beschreibung von Variablen, Abkürzungen und Fachbegriffen in dieser Collection.
+            Wird zur Anreicherung der Suchanfragen verwendet.
+          </p>
+          <textarea
+            value={contextDraft}
+            onChange={(e) => setContextDraft(e.target.value)}
+            placeholder="z.B. L1 beschreibt die Kühlerlänge, B2 ist die Breite des Gehäuses, DNx = Nenndurchmesser..."
+            className="flex-1 w-full text-sm p-3 border rounded-lg resize-none focus:ring-2 focus:ring-atlas-500 outline-none bg-white"
+          />
+          <button
+            onClick={handleSaveContext}
+            disabled={contextSaving || contextDraft === (selectedCollection.context_text || '')}
+            className="mt-3 w-full px-3 py-2 text-sm bg-atlas-600 text-white rounded-lg hover:bg-atlas-700 disabled:opacity-50 transition"
+          >
+            {contextSaving ? 'Speichern...' : 'Kontext speichern'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
