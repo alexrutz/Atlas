@@ -64,12 +64,22 @@ class RetrievalService:
             return []
 
         # Query-Embedding berechnen
+        logger.info(f"Retrieval: query='{query[:100]}', collections={collection_ids}, top_k={top_k}, "
+                     f"hybrid={self.config.hybrid_search}, threshold={self.config.similarity_threshold}")
         query_embedding = await self.embedding.embed_query(query)
+        logger.debug(f"Embedding berechnet: {len(query_embedding)} Dimensionen")
 
         if self.config.hybrid_search:
             results = await self._hybrid_search(query, query_embedding, collection_ids, top_k)
         else:
             results = await self._vector_search(query_embedding, collection_ids, top_k)
+
+        if results:
+            scores = [r.similarity_score for r in results]
+            logger.info(f"Retrieval: {len(results)} Ergebnisse, Scores: "
+                        f"max={max(scores):.3f}, min={min(scores):.3f}, avg={sum(scores)/len(scores):.3f}")
+        else:
+            logger.warning(f"Retrieval: 0 Ergebnisse für query='{query[:100]}'")
 
         # Optionales Reranking
         if self.config.rerank and len(results) > self.config.rerank_top_k:
@@ -141,6 +151,7 @@ class RetrievalService:
                 JOIN collections col ON d.collection_id = col.id
                 WHERE d.collection_id = ANY(:collection_ids)
                   AND d.processing_status = 'completed'
+                  AND 1 - (c.embedding <=> '{embedding_str}'::vector) > :threshold
                 ORDER BY c.embedding <=> '{embedding_str}'::vector
                 LIMIT :top_k * 2
             ),
@@ -158,7 +169,6 @@ class RetrievalService:
                    (:alpha * vr.vector_score + (1.0 - :alpha) * COALESCE(tr.text_score, 0)) as combined_score
             FROM vector_results vr
             LEFT JOIN text_results tr ON vr.id = tr.id
-            WHERE (:alpha * vr.vector_score + (1.0 - :alpha) * COALESCE(tr.text_score, 0)) > :threshold
             ORDER BY combined_score DESC
             LIMIT :top_k
         """)

@@ -86,7 +86,13 @@ class RAGPipeline:
         logger.info(f"Suche in Collections: {search_ids}")
         results = await self.retrieval.search(query=enriched_query, collection_ids=search_ids)
 
+        # Fallback: Bei leeren Ergebnissen mit Original-Query erneut suchen
+        if not results and enriched_query != question:
+            logger.info("Angereicherte Query lieferte keine Ergebnisse, Fallback auf Original-Query")
+            results = await self.retrieval.search(query=question, collection_ids=search_ids)
+
         if not results:
+            logger.warning(f"Keine Ergebnisse für Query '{question}' in Collections {search_ids}")
             return ChatResponse(
                 answer="Zu Ihrer Frage wurden keine relevanten Informationen in den ausgewählten Dokumenten gefunden.",
                 conversation_id=conversation_id or 0,
