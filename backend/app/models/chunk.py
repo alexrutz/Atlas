@@ -1,4 +1,4 @@
-"""ORM-Modell: Chunks mit Embeddings und Glossar."""
+"""ORM-Modell: Chunks mit Embeddings."""
 
 from datetime import datetime, timezone
 
@@ -18,7 +18,6 @@ class Chunk(Base):
     document_id: Mapped[int] = mapped_column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    enriched_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     section_header: Mapped[str | None] = mapped_column(String(500), nullable=True)
     page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -32,22 +31,3 @@ class Chunk(Base):
 
     # Relationships
     document = relationship("Document", back_populates="chunks")
-
-
-class GlossaryEntry(Base):
-    __tablename__ = "glossary_entries"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    collection_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("collections.id", ondelete="CASCADE"), nullable=True)
-    term: Mapped[str] = mapped_column(String(200), nullable=False)
-    definition: Mapped[str] = mapped_column(Text, nullable=False)
-    abbreviation: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-    __table_args__ = (
-        UniqueConstraint("collection_id", "term"),
-    )
-
-    # Relationships
-    collection = relationship("Collection", back_populates="glossary_entries")

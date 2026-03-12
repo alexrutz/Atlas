@@ -46,19 +46,3 @@ class AccessInfo(BaseModel):
     can_write: bool
 
     model_config = {"from_attributes": True}
-
-
-class GlossaryEntryCreate(BaseModel):
-    term: str
-    definition: str
-    abbreviation: str | None = None
-
-
-class GlossaryEntryResponse(BaseModel):
-    id: int
-    term: str
-    definition: str
-    abbreviation: str | None
-    created_at: datetime
-
-    model_config = {"from_attributes": True}

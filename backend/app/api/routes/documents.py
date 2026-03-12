@@ -13,7 +13,7 @@ from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.models.document import Document
 from app.models.collection import Collection
-from app.schemas.document import DocumentResponse, DocumentContextUpdate, DocumentStatusResponse
+from app.schemas.document import DocumentResponse, DocumentStatusResponse
 from app.core.database import async_session
 
 router = APIRouter()
@@ -56,7 +56,6 @@ async def upload_document(
     collection_id: int,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    context_description: str = Form(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -100,7 +99,6 @@ async def upload_document(
         file_path=str(file_path),
         file_type=suffix,
         file_size_bytes=len(content),
-        context_description=context_description,
         processing_status="pending",
         uploaded_by=current_user.id,
     )
@@ -134,33 +132,6 @@ async def delete_document(
         file_path.unlink()
 
     await db.delete(document)
-
-
-@router.put("/documents/{document_id}/context", response_model=DocumentResponse)
-async def update_context(
-    document_id: int,
-    data: DocumentContextUpdate,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Kontext-Beschreibung und Glossar eines Dokuments aktualisieren.
-
-    WICHTIG: Hier wird der Kontext definiert, der beim Embedding verwendet wird.
-    Beschreiben Sie, was in dem Dokument steht und erklären Sie Fachbegriffe.
-    """
-    result = await db.execute(select(Document).where(Document.id == document_id))
-    document = result.scalar_one_or_none()
-    if not document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dokument nicht gefunden")
-
-    if data.context_description is not None:
-        document.context_description = data.context_description
-    if data.glossary:
-        document.glossary = data.glossary
-
-    await db.flush()
-    await db.refresh(document)
-    return document
 
 
 @router.get("/documents/{document_id}/status", response_model=DocumentStatusResponse)

@@ -7,7 +7,7 @@
 
 import axios from 'axios'
 import type {
-  LoginResponse, Collection, Document, GlossaryEntry, AccessInfo,
+  LoginResponse, Collection, Document, AccessInfo,
   Conversation, Message, ChatResponse, Group, UserDetail,
 } from '../types'
 
@@ -123,26 +123,15 @@ export const collectionsApi = {
     api.delete(`/collections/${collectionId}/access/${groupId}`),
   getAccess: (collectionId: number) =>
     api.get<AccessInfo[]>(`/collections/${collectionId}/access`).then(r => r.data),
-  getGlossary: (collectionId: number) =>
-    api.get<GlossaryEntry[]>(`/collections/${collectionId}/glossary`).then(r => r.data),
-  addGlossaryEntry: (collectionId: number, data: { term: string; definition: string; abbreviation?: string }) =>
-    api.post<GlossaryEntry>(`/collections/${collectionId}/glossary`, data).then(r => r.data),
-  updateGlossaryEntry: (collectionId: number, entryId: number, data: { term: string; definition: string; abbreviation?: string }) =>
-    api.put<GlossaryEntry>(`/collections/${collectionId}/glossary/${entryId}`, data).then(r => r.data),
-  deleteGlossaryEntry: (collectionId: number, entryId: number) =>
-    api.delete(`/collections/${collectionId}/glossary/${entryId}`),
-  autoExtractGlossary: (collectionId: number) =>
-    api.post<GlossaryEntry[]>(`/collections/${collectionId}/glossary/auto-extract`).then(r => r.data),
 }
 
 // --- Documents ---
 export const documentsApi = {
   list: (collectionId: number) =>
     api.get<Document[]>(`/collections/${collectionId}/documents`).then(r => r.data),
-  upload: (collectionId: number, file: File, contextDescription?: string, onProgress?: (percent: number) => void) => {
+  upload: (collectionId: number, file: File, onProgress?: (percent: number) => void) => {
     const formData = new FormData()
     formData.append('file', file)
-    if (contextDescription) formData.append('context_description', contextDescription)
     return api.post<Document>(`/collections/${collectionId}/documents`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (e) => {
@@ -153,8 +142,6 @@ export const documentsApi = {
     }).then(r => r.data)
   },
   delete: (documentId: number) => api.delete(`/documents/${documentId}`),
-  updateContext: (documentId: number, data: { context_description?: string; glossary?: Record<string, string> }) =>
-    api.put(`/documents/${documentId}/context`, data).then(r => r.data),
   getStatus: (documentId: number) => api.get(`/documents/${documentId}/status`).then(r => r.data),
 }
 

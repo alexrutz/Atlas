@@ -81,24 +81,6 @@ class EmbeddingConfig(BaseModel):
     timeout: int = 60
 
 
-class ContextEnrichmentConfig(BaseModel):
-    enabled: bool = True
-    summarization_model: str = "llama3.1:8b"
-    max_context_tokens: int = 512
-    auto_glossary_extraction: bool = True
-    include_section_headers: bool = True
-    include_metadata_in_embedding: bool = True
-    embedding_template: str = (
-        "Dokument: {document_title}\n"
-        "Sammlung: {collection_name}\n"
-        "Abschnitt: {section_header}\n"
-        "Kontext: {context_description}\n"
-        "Glossar: {glossary}\n"
-        "---\n"
-        "{chunk_text}"
-    )
-
-
 class ChunkingConfig(BaseModel):
     strategy: str = "semantic"
     chunk_size: int = 512
@@ -111,14 +93,14 @@ class ChunkingConfig(BaseModel):
 class QueryEnrichmentConfig(BaseModel):
     enabled: bool = True
     prompt_template: str = (
-        "Du erhältst eine Benutzeranfrage und eine Liste von Glossar-Einträgen bzw. Kontext-Beschreibungen "
-        "aus Firmendokumenten. Deine Aufgabe: Erweitere die Anfrage um relevante Fachbegriffe, Abkürzungen "
-        "oder Variablennamen aus dem Glossar, die für die Suche hilfreich sein könnten.\n\n"
+        "Du erhältst eine Benutzeranfrage und Kontext-Beschreibungen "
+        "aus Firmendokumenten. Deine Aufgabe: Erweitere die Anfrage um relevante Fachbegriffe "
+        "oder Variablennamen aus dem Kontext, die für die Suche hilfreich sein könnten.\n\n"
         "WICHTIG:\n"
         "- Gib NUR die erweiterte Suchanfrage zurück, KEINE Erklärungen\n"
         "- Behalte die ursprüngliche Frage bei und ergänze nur relevante Begriffe\n"
-        "- Wenn kein Glossar-Eintrag relevant ist, gib die ursprüngliche Frage unverändert zurück\n\n"
-        "GLOSSAR UND KONTEXT:\n{context}\n\n"
+        "- Wenn kein Kontext relevant ist, gib die ursprüngliche Frage unverändert zurück\n\n"
+        "KONTEXT:\n{context}\n\n"
         "URSPRÜNGLICHE ANFRAGE: {query}\n\n"
         "ERWEITERTE SUCHANFRAGE:"
     )
@@ -168,7 +150,6 @@ class Settings(BaseModel):
     vector: VectorConfig = VectorConfig()
     llm: LLMConfig = LLMConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
-    context_enrichment: ContextEnrichmentConfig = ContextEnrichmentConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
     documents: DocumentsConfig = DocumentsConfig()

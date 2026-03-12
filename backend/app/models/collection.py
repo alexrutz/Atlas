@@ -22,7 +22,6 @@ class Collection(Base):
     # Relationships
     documents = relationship("Document", back_populates="collection", cascade="all, delete-orphan")
     group_access = relationship("GroupCollectionAccess", back_populates="collection", cascade="all, delete-orphan")
-    glossary_entries = relationship("GlossaryEntry", back_populates="collection", cascade="all, delete-orphan")
 
 
 class GroupCollectionAccess(Base):

@@ -79,34 +79,6 @@ embedding:
   timeout: 60                         # Timeout in Sekunden
 
 # -----------------------------------------------------------------------------
-# Context-Enriched Embedding Konfiguration
-# WICHTIG: Ermöglicht das Hinzufügen von Kontextwissen zu Dokumenten
-# -----------------------------------------------------------------------------
-context_enrichment:
-  enabled: true
-  # LLM für Kontext-Generierung (kann ein kleineres, schnelleres Modell sein)
-  summarization_model: "llama3.1:8b"
-  # Maximale Tokens für Kontext-Zusammenfassung
-  max_context_tokens: 512
-  # Ob automatisch ein Glossar aus dem Dokument extrahiert werden soll
-  auto_glossary_extraction: true
-  # Ob Chunk-Überschriften/Abschnitte als Kontext hinzugefügt werden sollen
-  include_section_headers: true
-  # Ob Dokumenten-Metadaten in den Embedding-Text integriert werden sollen
-  include_metadata_in_embedding: true
-  # Template für kontextangereicherten Embedding-Text
-  # Verfügbare Variablen: {document_title}, {collection_name},
-  #   {section_header}, {context_description}, {glossary}, {chunk_text}
-  embedding_template: |
-    Dokument: {document_title}
-    Sammlung: {collection_name}
-    Abschnitt: {section_header}
-    Kontext: {context_description}
-    Glossar: {glossary}
-    ---
-    {chunk_text}
-
-# -----------------------------------------------------------------------------
 # Dokument-Verarbeitung (Chunking)
 # -----------------------------------------------------------------------------
 chunking:
@@ -132,7 +104,7 @@ retrieval:
   similarity_threshold: 0.3           # Minimale Ähnlichkeit (0.0-1.0)
   hybrid_search: true                 # Kombination aus Vektor + Volltext
   hybrid_alpha: 0.7                   # Gewichtung Vektor vs. Volltext (1.0 = nur Vektor)
-  # Query-Anreicherung: Erweitert Suchanfragen mit Glossar-/Kontextinformationen
+  # Query-Anreicherung: Erweitert Suchanfragen mit Kontextinformationen
   # bevor die Retrieval-Suche ausgeführt wird
   query_enrichment:
     enabled: true                       # Query-Anreicherung aktivieren

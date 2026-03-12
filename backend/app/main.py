@@ -56,8 +56,6 @@ async def lifespan(app: FastAPI):
     logger.info("Atlas RAG System startet...")
     logger.info(f"LLM-Modell: {settings.llm.model}")
     logger.info(f"Embedding-Modell: {settings.embedding.model}")
-    logger.info(f"Context-Enrichment: {'aktiviert' if settings.context_enrichment.enabled else 'deaktiviert'}")
-
     # Datenbank-Tabellen erstellen (nur bei Erststart, danach Alembic nutzen)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
