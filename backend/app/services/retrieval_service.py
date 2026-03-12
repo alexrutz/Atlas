@@ -87,22 +87,21 @@ class RetrievalService:
         """Reine Vektorsuche mit pgvector."""
         embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
 
-        query = text("""
+        query = text(f"""
             SELECT c.id, c.document_id, c.content, c.section_header, c.page_number,
                    d.original_name as document_name, col.name as collection_name,
-                   1 - (c.embedding <=> :embedding::vector) as similarity
+                   1 - (c.embedding <=> '{embedding_str}'::vector) as similarity
             FROM chunks c
             JOIN documents d ON c.document_id = d.id
             JOIN collections col ON d.collection_id = col.id
             WHERE d.collection_id = ANY(:collection_ids)
               AND d.processing_status = 'completed'
-              AND 1 - (c.embedding <=> :embedding::vector) > :threshold
-            ORDER BY c.embedding <=> :embedding::vector
+              AND 1 - (c.embedding <=> '{embedding_str}'::vector) > :threshold
+            ORDER BY c.embedding <=> '{embedding_str}'::vector
             LIMIT :top_k
         """)
 
         result = await self.db.execute(query, {
-            "embedding": embedding_str,
             "collection_ids": collection_ids,
             "threshold": self.config.similarity_threshold,
             "top_k": top_k,
@@ -132,17 +131,17 @@ class RetrievalService:
         alpha = self.config.hybrid_alpha
         embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
 
-        query = text("""
+        query = text(f"""
             WITH vector_results AS (
                 SELECT c.id, c.document_id, c.content, c.section_header, c.page_number,
                        d.original_name as document_name, col.name as collection_name,
-                       1 - (c.embedding <=> :embedding::vector) as vector_score
+                       1 - (c.embedding <=> '{embedding_str}'::vector) as vector_score
                 FROM chunks c
                 JOIN documents d ON c.document_id = d.id
                 JOIN collections col ON d.collection_id = col.id
                 WHERE d.collection_id = ANY(:collection_ids)
                   AND d.processing_status = 'completed'
-                ORDER BY c.embedding <=> :embedding::vector
+                ORDER BY c.embedding <=> '{embedding_str}'::vector
                 LIMIT :top_k * 2
             ),
             text_results AS (
@@ -165,7 +164,6 @@ class RetrievalService:
         """)
 
         result = await self.db.execute(query, {
-            "embedding": embedding_str,
             "query_text": query_text,
             "collection_ids": collection_ids,
             "alpha": alpha,
