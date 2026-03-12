@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
@@ -60,6 +60,10 @@ async def lifespan(app: FastAPI):
     # Datenbank-Tabellen erstellen (nur bei Erststart, danach Alembic nutzen)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Fehlende Spalten hinzufügen (für bestehende Datenbanken ohne Alembic)
+        await conn.execute(text(
+            "ALTER TABLE collections ADD COLUMN IF NOT EXISTS context_text TEXT"
+        ))
 
     # Admin-Benutzer anlegen, falls keiner existiert
     await seed_admin_user()
