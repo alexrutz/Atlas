@@ -115,6 +115,7 @@ class RAGPipeline:
             answer=answer,
             results=results,
             search_ids=search_ids,
+            enriched_query=enriched_query,
         )
 
         # 7. Response zusammenbauen
@@ -162,6 +163,7 @@ class RAGPipeline:
     async def _save_to_conversation(
         self, user: User, conversation_id: int | None,
         question: str, answer: str, results, search_ids: list[int],
+        enriched_query: str | None = None,
     ) -> int:
         """Speichert Frage und Antwort in der Konversation."""
         if conversation_id:
@@ -185,6 +187,7 @@ class RAGPipeline:
         user_msg = Message(
             conversation_id=conv.id, role="user", content=question,
             used_collections=search_ids,
+            metadata_={"enriched_query": enriched_query} if enriched_query else {},
         )
         self.db.add(user_msg)
 

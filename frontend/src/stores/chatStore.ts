@@ -139,6 +139,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let fullContent = ''
       let sources: SourceChunk[] = []
       let conversationId = currentConversationId
+      let enrichedQuery: string | null = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -158,6 +159,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (event.type === 'token') {
               fullContent += event.content
               set({ streamingContent: fullContent })
+            } else if (event.type === 'enriched_query') {
+              enrichedQuery = event.enriched_query
+              // Attach enriched_query to the user message
+              set((state) => ({
+                messages: state.messages.map((m) =>
+                  m.id === userMsg.id ? { ...m, enriched_query: enrichedQuery } : m
+                ),
+              }))
             } else if (event.type === 'sources') {
               sources = event.sources
             } else if (event.type === 'done') {

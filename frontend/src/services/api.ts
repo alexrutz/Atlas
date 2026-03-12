@@ -146,11 +146,28 @@ export const documentsApi = {
 }
 
 // --- Settings ---
+export interface ModelConfig {
+  llm_model: string
+  embedding_model: string
+}
+
+export interface OllamaModel {
+  name: string
+  size: number | null
+  parameter_size: string | null
+}
+
 export const settingsApi = {
   getGlobalContext: () =>
     api.get<{ context_text: string }>('/settings/global-context').then(r => r.data),
   updateGlobalContext: (contextText: string) =>
     api.put<{ context_text: string }>('/settings/global-context', { context_text: contextText }).then(r => r.data),
+  getModelConfig: () =>
+    api.get<ModelConfig>('/settings/models').then(r => r.data),
+  updateModelConfig: (data: { llm_model?: string; embedding_model?: string }) =>
+    api.put<ModelConfig>('/settings/models', data).then(r => r.data),
+  getAvailableModels: () =>
+    api.get<{ models: OllamaModel[] }>('/settings/models/available').then(r => r.data),
 }
 
 // --- Chat ---

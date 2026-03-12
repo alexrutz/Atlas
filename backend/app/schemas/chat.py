@@ -40,6 +40,7 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     sources: list[SourceChunk] = []
+    enriched_query: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -88,6 +88,7 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   sources: SourceChunk[]
+  enriched_query?: string | null
   created_at: string
 }
 
