@@ -8,10 +8,10 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { usersApi, groupsApi, collectionsApi } from '../services/api'
+import { usersApi, groupsApi, collectionsApi, dockerAdminApi } from '../services/api'
 import type { UserDetail, Group, Collection, AccessInfo } from '../types'
 
-type Tab = 'users' | 'groups' | 'collections'
+type Tab = 'users' | 'groups' | 'collections' | 'docker'
 
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -20,6 +20,7 @@ export default function AdminPage() {
     { key: 'users', label: 'Benutzer' },
     { key: 'groups', label: 'Gruppen' },
     { key: 'collections', label: 'Collections' },
+    { key: 'docker', label: 'Docker & System' },
   ]
 
   return (
@@ -48,6 +49,7 @@ export default function AdminPage() {
         {activeTab === 'users' && <UsersTab />}
         {activeTab === 'groups' && <GroupsTab />}
         {activeTab === 'collections' && <CollectionsTab />}
+        {activeTab === 'docker' && <DockerSystemTab />}
       </div>
     </div>
   )
@@ -943,6 +945,206 @@ function CollectionsTab() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+
+function DockerSystemTab() {
+  const [resources, setResources] = useState<{
+    containers: Array<{ id: string; name: string; image: string; status: string }>
+    images: Array<{ id: string; tags: string[] }>
+    volumes: Array<{ name: string }>
+  }>({ containers: [], images: [], volumes: [] })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [messages, setMessages] = useState<string[]>([])
+  const [selectedContainers, setSelectedContainers] = useState<string[]>([])
+  const [selectedImages, setSelectedImages] = useState<string[]>([])
+  const [selectedVolumes, setSelectedVolumes] = useState<string[]>([])
+  const [actions, setActions] = useState({
+    stop_containers: false,
+    restart_containers: false,
+    remove_containers: false,
+    remove_images: false,
+    rebuild_images: false,
+    remove_volumes: false,
+  })
+  const [running, setRunning] = useState(false)
+  const [repoUpdating, setRepoUpdating] = useState(false)
+  const [logContainerId, setLogContainerId] = useState('')
+  const [logLines, setLogLines] = useState<string[]>([])
+
+  const loadResources = useCallback(async () => {
+    try {
+      setLoading(true)
+      const data = await dockerAdminApi.getResources()
+      setResources(data)
+      setError('')
+      if (!logContainerId && data.containers.length > 0) {
+        setLogContainerId(data.containers[0].id)
+      }
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Docker-Ressourcen konnten nicht geladen werden')
+    } finally {
+      setLoading(false)
+    }
+  }, [logContainerId])
+
+  useEffect(() => {
+    loadResources()
+  }, [loadResources])
+
+  useEffect(() => {
+    if (!logContainerId) return
+    const token = localStorage.getItem('atlas_token')
+    if (!token) {
+      setError('Kein Auth-Token verfügbar für Log-Stream')
+      return
+    }
+    const evt = new EventSource(`/api/settings/docker/logs/stream?container_id=${encodeURIComponent(logContainerId)}&tail=100&token=${encodeURIComponent(token)}`)
+
+    evt.onmessage = (event) => {
+      setLogLines((prev) => [...prev.slice(-299), event.data])
+    }
+
+    evt.onerror = () => {
+      evt.close()
+    }
+
+    return () => evt.close()
+  }, [logContainerId])
+
+  const toggle = (list: string[], setList: (v: string[]) => void, value: string) => {
+    setList(list.includes(value) ? list.filter((v) => v !== value) : [...list, value])
+  }
+
+  const runActions = async () => {
+    setRunning(true)
+    setError('')
+    try {
+      const result = await dockerAdminApi.runActions({
+        container_ids: selectedContainers,
+        image_ids: selectedImages,
+        volume_names: selectedVolumes,
+        ...actions,
+      })
+      setMessages(result.messages)
+      await loadResources()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Aktionen konnten nicht ausgeführt werden')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  const triggerRepoUpdate = async () => {
+    if (!confirm('Repository wirklich vollständig neu klonen und Setup ausführen?')) return
+    setRepoUpdating(true)
+    try {
+      const result = await dockerAdminApi.triggerRepoUpdate()
+      setMessages([result.message])
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Repo-Update konnte nicht gestartet werden')
+    } finally {
+      setRepoUpdating(false)
+    }
+  }
+
+  if (loading) return <div className="text-gray-500">Laden...</div>
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>}
+      {messages.length > 0 && (
+        <div className="bg-green-50 text-green-700 p-3 rounded text-sm">
+          {messages.map((m) => <div key={m}>{m}</div>)}
+        </div>
+      )}
+
+      <div className="grid md:grid-cols-3 gap-6">
+        <div className="bg-white rounded-lg shadow p-4">
+          <h3 className="font-semibold mb-3">Container</h3>
+          <div className="space-y-2 max-h-64 overflow-auto">
+            {resources.containers.map((c) => (
+              <label key={c.id} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={selectedContainers.includes(c.id)} onChange={() => toggle(selectedContainers, setSelectedContainers, c.id)} />
+                <span>{c.name} <span className="text-gray-500">({c.status})</span></span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-4">
+          <h3 className="font-semibold mb-3">Images</h3>
+          <div className="space-y-2 max-h-64 overflow-auto">
+            {resources.images.map((img) => (
+              <label key={img.id} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={selectedImages.includes(img.id)} onChange={() => toggle(selectedImages, setSelectedImages, img.id)} />
+                <span>{img.tags[0] || img.id.slice(0, 12)}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-4">
+          <h3 className="font-semibold mb-3">Volumes</h3>
+          <div className="space-y-2 max-h-64 overflow-auto">
+            {resources.volumes.map((v) => (
+              <label key={v.name} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={selectedVolumes.includes(v.name)} onChange={() => toggle(selectedVolumes, setSelectedVolumes, v.name)} />
+                <span>{v.name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow p-4">
+        <h3 className="font-semibold mb-3">Aktionen</h3>
+        <div className="grid md:grid-cols-3 gap-2 text-sm">
+          {Object.entries(actions).map(([key, value]) => (
+            <label key={key} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={value}
+                onChange={(e) => setActions((prev) => ({ ...prev, [key]: e.target.checked }))}
+              />
+              <span>{key}</span>
+            </label>
+          ))}
+        </div>
+        <div className="flex gap-3 mt-4">
+          <button onClick={runActions} disabled={running} className="px-4 py-2 bg-atlas-600 text-white rounded text-sm hover:bg-atlas-700 disabled:opacity-50">
+            {running ? 'Ausführen...' : 'Ausgewählte Aktionen ausführen'}
+          </button>
+          <button onClick={loadResources} className="px-4 py-2 border rounded text-sm">Aktualisieren</button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow p-4">
+        <h3 className="font-semibold mb-3">Repository komplett aktualisieren</h3>
+        <button onClick={triggerRepoUpdate} disabled={repoUpdating} className="px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50">
+          {repoUpdating ? 'Starte...' : 'Atlas-Ordner löschen, neu klonen & installieren'}
+        </button>
+      </div>
+
+      <div className="bg-white rounded-lg shadow p-4">
+        <h3 className="font-semibold mb-3">Docker Logs (live)</h3>
+        <select
+          className="border rounded px-2 py-1 text-sm mb-3"
+          value={logContainerId}
+          onChange={(e) => { setLogLines([]); setLogContainerId(e.target.value) }}
+        >
+          {resources.containers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <pre className="bg-gray-900 text-green-300 rounded p-3 text-xs h-64 overflow-auto">
+          {logLines.join('\n')}
+        </pre>
+      </div>
     </div>
   )
 }
