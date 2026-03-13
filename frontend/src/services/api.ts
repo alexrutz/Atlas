@@ -170,6 +170,41 @@ export const settingsApi = {
     api.get<{ models: OllamaModel[] }>('/settings/models/available').then(r => r.data),
 }
 
+
+export interface DockerContainerInfo {
+  id: string
+  name: string
+  image: string
+  status: string
+}
+
+export interface DockerImageInfo {
+  id: string
+  tags: string[]
+}
+
+export interface DockerVolumeInfo {
+  name: string
+}
+
+export interface DockerResourcesResponse {
+  containers: DockerContainerInfo[]
+  images: DockerImageInfo[]
+  volumes: DockerVolumeInfo[]
+}
+
+export interface DockerActionRequest {
+  container_ids?: string[]
+  image_ids?: string[]
+  volume_names?: string[]
+  stop_containers?: boolean
+  restart_containers?: boolean
+  remove_containers?: boolean
+  remove_images?: boolean
+  rebuild_images?: boolean
+  remove_volumes?: boolean
+}
+
 // --- Chat ---
 export const chatApi = {
   listConversations: () => api.get<Conversation[]>('/conversations').then(r => r.data),
@@ -192,6 +227,16 @@ export const chatApi = {
   },
   updateSelectedCollections: (collectionIds: number[]) =>
     api.put('/chat/collections', { collection_ids: collectionIds }),
+}
+
+
+
+export const dockerAdminApi = {
+  getResources: () => api.get<DockerResourcesResponse>('/settings/docker/resources').then(r => r.data),
+  runActions: (data: DockerActionRequest) =>
+    api.post<{ messages: string[] }>('/settings/docker/actions', data).then(r => r.data),
+  triggerRepoUpdate: () =>
+    api.post<{ started: boolean; message: string }>('/settings/repo/update').then(r => r.data),
 }
 
 export default api

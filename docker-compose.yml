@@ -20,7 +20,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ../postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U atlas_user -d atlas"]
@@ -40,7 +40,7 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama_data:/root/.ollama
+      - ../ollama_data:/root/.ollama
     deploy:
       resources:
         reservations:
@@ -66,10 +66,10 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./models:/models
+      - ../models:/models
     command:
       - -m
-      - /models/llama-3.1-8b-instruct.gguf
+      - /models/Qwen3.5-35B-A3B-UD-IQ3_S.gguf
       - --host
       - 0.0.0.0
       - --port
@@ -80,7 +80,7 @@ services:
       - "999"
       - --jinja
       - --alias
-      - llama-3.1-8b-instruct
+      - Qwen3.5-35B-A3B-UD-IQ3_S.gguf
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 20s
@@ -109,12 +109,15 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY muss gesetzt sein}
       ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-admin}
+      ATLAS_PROJECT_PATH: /workspace/Atlas
     ports:
       - "8000:8000"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - upload_data:/tmp/atlas_uploads
       - ./logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/workspace/Atlas
     depends_on:
       postgres:
         condition: service_healthy
@@ -142,8 +145,6 @@ services:
       - atlas-network
 
 volumes:
-  postgres_data:
-  ollama_data:
   upload_data:
 
 networks:

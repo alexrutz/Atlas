@@ -7,13 +7,13 @@ allgemeinen Kontext und den Collection-spezifischen Kontext-Texten angereichert.
 
 import logging
 
-import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.models.collection import Collection
 from app.models.system_setting import SystemSetting
+from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class QueryEnrichmentService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.config = settings.retrieval.query_enrichment
-        self.llm_config = settings.llm
+        self.llm_service = LLMService()
 
     async def enrich_query(
         self,
@@ -108,21 +108,7 @@ class QueryEnrichmentService:
         )
 
         try:
-            async with httpx.AsyncClient(timeout=self.llm_config.timeout) as client:
-                response = await client.post(
-                    f"{self.llm_config.base_url}/api/generate",
-                    json={
-                        "model": self.llm_config.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.0,
-                            "num_predict": 256,
-                        },
-                    },
-                )
-                response.raise_for_status()
-                enriched_query = response.json()["response"].strip()
+            enriched_query = (await self.llm_service.generate(prompt, system_prompt="")).strip()
 
             if enriched_query:
                 logger.info(

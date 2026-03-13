@@ -58,7 +58,7 @@ class VectorConfig(BaseModel):
 class LLMConfig(BaseModel):
     provider: str = "ollama"
     base_url: str = "http://ollama:11434"
-    model: str = "llama3.1:8b"
+    model: str = "Qwen3.5-35B-A3B-UD-IQ3_S.gguf"
     temperature: float = 0.1
     top_p: float = 0.9
     top_k: int = 40

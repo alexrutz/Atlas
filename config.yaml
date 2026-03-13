@@ -49,7 +49,7 @@ vector:
 llm:
   provider: "llama_cpp"               # ollama oder llama_cpp
   base_url: "http://llama-cpp:8080"   # llama.cpp Server URL (OpenAI-kompatibel)
-  model: "llama-3.1-8b-instruct"      # Modellalias im llama.cpp Server
+  model: "Qwen3.5-35B-A3B-UD-IQ3_S.gguf"      # Modellalias im llama.cpp Server
   temperature: 0.1                    # Kreativität (0.0 = deterministisch)
   top_p: 0.9                         # Nucleus Sampling
   top_k: 40                          # Top-K Sampling
