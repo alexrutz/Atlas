@@ -31,7 +31,7 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # Ollama - Lokaler LLM & Embedding Server
+  # Ollama - Lokaler Embedding Server
   # ---------------------------------------------------------------------------
   ollama:
     image: ollama/ollama:latest
@@ -53,6 +53,41 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
+  # llama.cpp - Lokaler LLM Server (OpenAI-kompatibel)
+  # ---------------------------------------------------------------------------
+  llama-cpp:
+    image: ghcr.io/ggerganov/llama.cpp:server-cuda
+    container_name: atlas-llama-cpp
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./models:/models
+    command:
+      - -m
+      - /models/llama-3.1-8b-instruct.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -c
+      - "8192"
+      - -ngl
+      - "999"
+      - --jinja
+      - --alias
+      - llama-3.1-8b-instruct
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     networks:
       - atlas-network
 
@@ -80,6 +115,8 @@ services:
         condition: service_healthy
       ollama:
         condition: service_healthy
+      llama-cpp:
+        condition: service_started
     networks:
       - atlas-network
 

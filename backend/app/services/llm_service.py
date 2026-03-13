@@ -1,7 +1,6 @@
-"""
-LLM Service - Kommunikation mit dem lokalen LLM (Ollama).
+"""LLM Service - Kommunikation mit dem lokalen LLM.
 
-Unterstützt Streaming und Nicht-Streaming Antworten.
+Unterstützt aktuell Ollama und den nativen llama.cpp Server.
 """
 
 import json
@@ -16,23 +15,23 @@ logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    """Kommunikation mit dem lokalen LLM über die Ollama API."""
+    """Kommunikation mit dem lokalen LLM über Ollama oder llama.cpp."""
 
     def __init__(self):
         self.config = settings.llm
         self.base_url = self.config.base_url
 
-    async def generate(self, prompt: str, system_prompt: str | None = None) -> str:
-        """
-        Generiert eine vollständige Antwort (nicht-streaming).
+    def _build_messages(self, prompt: str, system_prompt: str | None = None) -> list[dict[str, str]]:
+        """Erstellt OpenAI-kompatible Message-Struktur für llama.cpp."""
+        messages = []
+        system = system_prompt or self.config.system_prompt
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        return messages
 
-        Args:
-            prompt: Der Benutzer-Prompt mit Kontext
-            system_prompt: Optionaler System-Prompt (Standard aus config)
-
-        Returns:
-            Die generierte Antwort als String
-        """
+    async def _generate_ollama(self, prompt: str, system_prompt: str | None = None) -> str:
+        """Generiert Antwort über die Ollama /api/generate API."""
         system = system_prompt or self.config.system_prompt
 
         async with httpx.AsyncClient(timeout=self.config.timeout) as client:
@@ -55,17 +54,40 @@ class LLMService:
             response.raise_for_status()
             return response.json()["response"]
 
-    async def generate_stream(self, prompt: str, system_prompt: str | None = None) -> AsyncGenerator[str, None]:
+    async def _generate_llama_cpp(self, prompt: str, system_prompt: str | None = None) -> str:
+        """Generiert Antwort über llama.cpp OpenAI-kompatible API."""
+        async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+            response = await client.post(
+                f"{self.base_url}/v1/chat/completions",
+                json={
+                    "model": self.config.model,
+                    "messages": self._build_messages(prompt, system_prompt),
+                    "temperature": self.config.temperature,
+                    "top_p": self.config.top_p,
+                    "max_tokens": self.config.max_tokens,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+
+    async def generate(self, prompt: str, system_prompt: str | None = None) -> str:
         """
-        Generiert eine Antwort als Stream (für Server-Sent Events).
+        Generiert eine vollständige Antwort (nicht-streaming).
 
         Args:
             prompt: Der Benutzer-Prompt mit Kontext
-            system_prompt: Optionaler System-Prompt
+            system_prompt: Optionaler System-Prompt (Standard aus config)
 
-        Yields:
-            Teile der Antwort als Strings
+        Returns:
+            Die generierte Antwort als String
         """
+        if self.config.provider == "ollama":
+            return await self._generate_ollama(prompt, system_prompt)
+        return await self._generate_llama_cpp(prompt, system_prompt)
+
+    async def _generate_stream_ollama(self, prompt: str, system_prompt: str | None = None) -> AsyncGenerator[str, None]:
+        """Streaming-Antwort über Ollama API."""
         system = system_prompt or self.config.system_prompt
 
         async with httpx.AsyncClient(timeout=self.config.timeout) as client:
@@ -92,6 +114,55 @@ class LLMService:
                         data = json.loads(line)
                         if not data.get("done", False):
                             yield data.get("response", "")
+
+    async def _generate_stream_llama_cpp(self, prompt: str, system_prompt: str | None = None) -> AsyncGenerator[str, None]:
+        """Streaming-Antwort über llama.cpp OpenAI-kompatible API."""
+        async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/v1/chat/completions",
+                json={
+                    "model": self.config.model,
+                    "messages": self._build_messages(prompt, system_prompt),
+                    "temperature": self.config.temperature,
+                    "top_p": self.config.top_p,
+                    "max_tokens": self.config.max_tokens,
+                    "stream": True,
+                },
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+
+                    payload = line.removeprefix("data: ").strip()
+                    if payload == "[DONE]":
+                        break
+
+                    data = json.loads(payload)
+                    delta = data.get("choices", [{}])[0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        yield content
+
+    async def generate_stream(self, prompt: str, system_prompt: str | None = None) -> AsyncGenerator[str, None]:
+        """
+        Generiert eine Antwort als Stream (für Server-Sent Events).
+
+        Args:
+            prompt: Der Benutzer-Prompt mit Kontext
+            system_prompt: Optionaler System-Prompt
+
+        Yields:
+            Teile der Antwort als Strings
+        """
+        if self.config.provider == "ollama":
+            async for chunk in self._generate_stream_ollama(prompt, system_prompt):
+                yield chunk
+            return
+
+        async for chunk in self._generate_stream_llama_cpp(prompt, system_prompt):
+            yield chunk
 
     def build_rag_prompt(self, question: str, contexts: list[dict]) -> str:
         """

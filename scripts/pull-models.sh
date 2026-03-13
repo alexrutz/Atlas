@@ -1,20 +1,26 @@
 #!/bin/bash
 # =============================================================================
-# Ollama-Modelle herunterladen
+# Modelle vorbereiten
 # =============================================================================
-# Lädt die in config.yaml konfigurierten Modelle herunter.
+# Lädt das Embedding-Modell via Ollama und prüft das llama.cpp GGUF-Modell.
 # =============================================================================
 
 set -e
 
-OLLAMA_URL="http://localhost:11434"
+LLM_MODEL_PATH="models/llama-3.1-8b-instruct.gguf"
 
 echo "Lade Embedding-Modell: nomic-embed-text..."
 docker exec atlas-ollama ollama pull nomic-embed-text
 
 echo ""
-echo "Lade LLM-Modell: llama3.1:8b (Hauptmodell und Kontext-Generierung)..."
-docker exec atlas-ollama ollama pull llama3.1:8b
+if [ -f "$LLM_MODEL_PATH" ]; then
+    echo "llama.cpp Modell gefunden: $LLM_MODEL_PATH"
+else
+    echo "FEHLER: llama.cpp Modell fehlt: $LLM_MODEL_PATH"
+    echo "Bitte lade ein GGUF-Instruct-Modell herunter und speichere es unter:"
+    echo "  $LLM_MODEL_PATH"
+    exit 1
+fi
 
 echo ""
-echo "Modelle erfolgreich heruntergeladen."
+echo "Modelle erfolgreich vorbereitet."

@@ -54,7 +54,7 @@ Atlas is a fully **on-premises** Retrieval-Augmented Generation (RAG) system des
 
 Atlas solves a common enterprise problem: critical knowledge is locked in PDFs, Word documents, spreadsheets, and other files scattered across file servers. Finding the right information is slow and error-prone.
 
-Atlas ingests those documents, chunks and embeds them using a local embedding model, stores the vectors in PostgreSQL (via pgvector), and exposes a chat interface where users can ask questions in natural language. All inference is handled on-premises by [Ollama](https://ollama.com/), so sensitive company data never reaches external APIs.
+Atlas ingests those documents, chunks and embeds them using a local embedding model, stores the vectors in PostgreSQL (via pgvector), and exposes a chat interface where users can ask questions in natural language. Text generation runs on-premises via native [llama.cpp](https://github.com/ggerganov/llama.cpp), and embeddings are served locally by [Ollama](https://ollama.com/), so sensitive company data never reaches external APIs.
 
 ---
 
@@ -62,7 +62,7 @@ Atlas ingests those documents, chunks and embeds them using a local embedding mo
 
 | Feature | Description |
 |---|---|
-| **100% Local** | All LLM inference and embeddings run via Ollama — no cloud calls |
+| **100% Local** | LLM inference runs via llama.cpp and embeddings via Ollama — no cloud calls |
 | **Hybrid Search** | Combines pgvector cosine similarity with PostgreSQL full-text search |
 | **Query Enrichment** | Automatically expands queries with collection context before retrieval |
 | **Reranking** | Cross-encoder reranking narrows the initial top-10 hits to the best 5 |
@@ -110,7 +110,7 @@ Atlas ingests those documents, chunks and embeds them using a local embedding mo
        │                        │
        ▼                        ▼
 ┌─────────────────┐    ┌─────────────────────┐
-│  PostgreSQL 16  │    │  Ollama  (port 11434)│
+│  PostgreSQL 16  │    │  llama.cpp (8080) +   │
 │  + pgvector     │    │                     │
 │                 │    │  nomic-embed-text    │
 │  - users        │    │  llama3.1:8b         │
@@ -167,7 +167,7 @@ All four services run in Docker containers on a shared internal network (`atlas-
 | Component | Technology |
 |---|---|
 | Database | PostgreSQL 16 + pgvector extension |
-| LLM runtime | Ollama |
+| LLM runtime | llama.cpp server |
 | Web server / proxy | Nginx |
 | Containerization | Docker + Docker Compose |
 
@@ -250,15 +250,16 @@ cd Atlas
 cp .env.example .env
 # Edit .env with your values
 
-# 2. Start the database and Ollama first
-docker compose up -d postgres ollama
+# 2. Start infrastructure services first
+docker compose up -d postgres ollama llama-cpp
 
-# 3. Wait for both to be healthy
-docker compose ps  # wait until postgres and ollama show "(healthy)"
+# 3. Wait for services to initialize
+docker compose ps  # wait until postgres/ollama are healthy and llama-cpp is running
 
-# 4. Download the required AI models
+ # 4. Download embedding model and provide GGUF for llama.cpp
 docker exec atlas-ollama ollama pull nomic-embed-text
-docker exec atlas-ollama ollama pull llama3.1:8b
+mkdir -p models
+# copy your GGUF model to models/llama-3.1-8b-instruct.gguf
 
 # 5. Build and start the backend (it will auto-migrate the database)
 docker compose up -d --build backend
@@ -366,9 +367,9 @@ vector:
 
 ```yaml
 llm:
-  provider: "ollama"
-  base_url: "http://ollama:11434"
-  model: "llama3.1:8b"      # Any model available in Ollama
+  provider: "llama_cpp"
+  base_url: "http://llama-cpp:8080"
+  model: "llama-3.1-8b-instruct"  # Must match the llama.cpp alias
   temperature: 0.1           # 0.0 = deterministic, 1.0 = creative
   top_p: 0.9
   top_k: 40
@@ -877,7 +878,8 @@ OCR languages default to German + English (`deu+eng`). Additional Tesseract lang
 | Service | Container Name | Port | Image |
 |---|---|---|---|
 | PostgreSQL + pgvector | `atlas-postgres` | 5432 | `pgvector/pgvector:pg16` |
-| Ollama LLM server | `atlas-ollama` | 11434 | `ollama/ollama:latest` |
+| Ollama embedding server | `atlas-ollama` | 11434 | `ollama/ollama:latest` |
+| llama.cpp LLM server | `atlas-llama-cpp` | 8080 | `ghcr.io/ggerganov/llama.cpp:server-cuda` |
 | FastAPI backend | `atlas-backend` | 8000 | Custom (Python 3.12) |
 | React frontend + Nginx | `atlas-frontend` | 3000 | Custom (Node + Nginx) |
 
@@ -890,6 +892,7 @@ docker compose up -d
 # View logs for a specific service
 docker compose logs backend -f
 docker compose logs ollama -f
+docker compose logs llama-cpp -f
 
 # Restart a single service after config change
 docker compose restart backend
@@ -982,7 +985,6 @@ If it shows `(health: starting)`, wait a few seconds. The backend retries on sta
 docker exec atlas-ollama ollama list
 # If the model is missing, pull it again:
 docker exec atlas-ollama ollama pull nomic-embed-text
-docker exec atlas-ollama ollama pull llama3.1:8b
 ```
 
 ### Document processing is stuck

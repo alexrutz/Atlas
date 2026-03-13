@@ -38,20 +38,20 @@ fi
 # 3. Verzeichnisse erstellen
 echo ""
 echo "[3/6] Erstelle Verzeichnisse..."
-mkdir -p logs
-echo "  logs/ erstellt"
+mkdir -p logs models
+echo "  logs/ und models/ erstellt"
 
 # 4. Docker-Container starten
 echo ""
 echo "[4/6] Starte Docker-Container..."
-docker compose up -d postgres ollama
-echo "  PostgreSQL und Ollama gestartet. Warte auf Bereitschaft..."
+docker compose up -d postgres ollama llama-cpp
+echo "  PostgreSQL, Ollama und llama.cpp gestartet. Warte auf Bereitschaft..."
 sleep 10
 
 # 5. Ollama-Modelle herunterladen
 echo ""
-echo "[5/6] Lade LLM- und Embedding-Modelle herunter..."
-echo "  Dies kann beim ersten Mal 30-60 Minuten dauern!"
+echo "[5/6] Bereite LLM- und Embedding-Modelle vor..."
+echo "  Embedding-Download kann beim ersten Mal mehrere Minuten dauern."
 bash scripts/pull-models.sh
 
 # 6. Backend und Frontend starten

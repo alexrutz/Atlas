@@ -44,12 +44,12 @@ vector:
   probes: 10                          # Anzahl der zu durchsuchenden Listen
 
 # -----------------------------------------------------------------------------
-# LLM-Konfiguration (Lokales Modell via Ollama)
+# LLM-Konfiguration (Lokales Modell via llama.cpp)
 # -----------------------------------------------------------------------------
 llm:
-  provider: "ollama"                  # ollama oder vllm
-  base_url: "http://ollama:11434"     # Ollama API URL
-  model: "llama3.1:8b"               # Modellname
+  provider: "llama_cpp"               # ollama oder llama_cpp
+  base_url: "http://llama-cpp:8080"   # llama.cpp Server URL (OpenAI-kompatibel)
+  model: "llama-3.1-8b-instruct"      # Modellalias im llama.cpp Server
   temperature: 0.1                    # Kreativität (0.0 = deterministisch)
   top_p: 0.9                         # Nucleus Sampling
   top_k: 40                          # Top-K Sampling
