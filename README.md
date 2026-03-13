@@ -54,7 +54,7 @@ Atlas is a fully **on-premises** Retrieval-Augmented Generation (RAG) system des
 
 Atlas solves a common enterprise problem: critical knowledge is locked in PDFs, Word documents, spreadsheets, and other files scattered across file servers. Finding the right information is slow and error-prone.
 
-Atlas ingests those documents, chunks and embeds them using a local embedding model, stores the vectors in PostgreSQL (via pgvector), and exposes a chat interface where users can ask questions in natural language. Text generation runs on-premises via native [llama.cpp](https://github.com/ggerganov/llama.cpp), and embeddings are served locally by [Ollama](https://ollama.com/), so sensitive company data never reaches external APIs.
+Atlas ingests those documents, chunks and embeds them using a local embedding model, stores the vectors in PostgreSQL (via pgvector), and exposes a chat interface where users can ask questions in natural language. Text generation runs on-premises via native [llama.cpp](https://github.com/ggml-org/llama.cpp/tree/master/tools/server), and embeddings are served locally by [Ollama](https://ollama.com/), so sensitive company data never reaches external APIs.
 
 ---
 
@@ -254,7 +254,7 @@ cp .env.example .env
 docker compose up -d postgres ollama llama-cpp
 
 # 3. Wait for services to initialize
-docker compose ps  # wait until postgres/ollama are healthy and llama-cpp is running
+docker compose ps  # wait until postgres/ollama/llama-cpp are healthy
 
  # 4. Download embedding model and provide GGUF for llama.cpp
 docker exec atlas-ollama ollama pull nomic-embed-text
@@ -879,7 +879,7 @@ OCR languages default to German + English (`deu+eng`). Additional Tesseract lang
 |---|---|---|---|
 | PostgreSQL + pgvector | `atlas-postgres` | 5432 | `pgvector/pgvector:pg16` |
 | Ollama embedding server | `atlas-ollama` | 11434 | `ollama/ollama:latest` |
-| llama.cpp LLM server | `atlas-llama-cpp` | 8080 | `ghcr.io/ggerganov/llama.cpp:server-cuda` |
+| llama.cpp LLM server | `atlas-llama-cpp` | 8080 | `ghcr.io/ggml-org/llama.cpp:server-cuda` |
 | FastAPI backend | `atlas-backend` | 8000 | Custom (Python 3.12) |
 | React frontend + Nginx | `atlas-frontend` | 3000 | Custom (Node + Nginx) |
 

@@ -60,7 +60,7 @@ services:
   # llama.cpp - Lokaler LLM Server (OpenAI-kompatibel)
   # ---------------------------------------------------------------------------
   llama-cpp:
-    image: ghcr.io/ggerganov/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: atlas-llama-cpp
     restart: unless-stopped
     ports:
@@ -81,6 +81,11 @@ services:
       - --jinja
       - --alias
       - llama-3.1-8b-instruct
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         reservations:
@@ -116,7 +121,7 @@ services:
       ollama:
         condition: service_healthy
       llama-cpp:
-        condition: service_started
+        condition: service_healthy
     networks:
       - atlas-network
 
