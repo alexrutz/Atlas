@@ -20,7 +20,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ../postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U atlas_user -d atlas"]
@@ -31,7 +31,7 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # Ollama - Lokaler LLM & Embedding Server
+  # Ollama - Lokaler Embedding Server
   # ---------------------------------------------------------------------------
   ollama:
     image: ollama/ollama:latest
@@ -40,7 +40,7 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama_data:/root/.ollama
+      - ../ollama_data:/root/.ollama
     deploy:
       resources:
         reservations:
@@ -57,6 +57,46 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
+  # llama.cpp - Lokaler LLM Server (OpenAI-kompatibel)
+  # ---------------------------------------------------------------------------
+  llama-cpp:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: atlas-llama-cpp
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../models:/models
+    command:
+      - -m
+      - /models/Qwen3.5-35B-A3B-UD-IQ3_S.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -c
+      - "8192"
+      - -ngl
+      - "999"
+      - --jinja
+      - --alias
+      - Qwen3.5-35B-A3B-UD-IQ3_S.gguf
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
   # Atlas Backend (FastAPI)
   # ---------------------------------------------------------------------------
   backend:
@@ -69,16 +109,21 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY muss gesetzt sein}
       ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-admin}
+      ATLAS_PROJECT_PATH: /workspace/Atlas
     ports:
       - "8000:8000"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - upload_data:/tmp/atlas_uploads
       - ./logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/workspace/Atlas
     depends_on:
       postgres:
         condition: service_healthy
       ollama:
+        condition: service_healthy
+      llama-cpp:
         condition: service_healthy
     networks:
       - atlas-network
@@ -100,8 +145,6 @@ services:
       - atlas-network
 
 volumes:
-  postgres_data:
-  ollama_data:
   upload_data:
 
 networks:
