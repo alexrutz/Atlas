@@ -17,6 +17,7 @@ class ChatRequest(BaseModel):
     conversation_id: int | None = None
     collection_ids: list[int] | None = None  # Override für ausgewählte Collections
     mode: ChatMode = ChatMode.rag
+    enable_thinking: bool | None = None
 
 
 class ChatResponse(BaseModel):

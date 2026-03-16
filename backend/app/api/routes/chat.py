@@ -162,6 +162,7 @@ async def ask_question(
             conversation_id=request.conversation_id,
             collection_ids=request.collection_ids,
             mode=request.mode,
+            enable_thinking=request.enable_thinking,
         )
         return result
     except Exception as e:
@@ -189,6 +190,7 @@ async def ask_question_stream(
                     async for token in pipeline.llm.generate_stream(
                         request.question,
                         system_prompt=pipeline.llm.config.answer_system_prompt,
+                        enable_thinking=request.enable_thinking,
                     ):
                         full_answer += token
                         data = json.dumps({"type": "token", "content": token})
@@ -252,11 +254,6 @@ async def ask_question_stream(
 
         results = await pipeline.retrieval.search(query=enriched_query, collection_ids=search_ids)
 
-        # Fallback: Bei leeren Ergebnissen mit Original-Query erneut suchen
-        if not results and enriched_query != request.question:
-            logger.info("Angereicherte Query lieferte keine Ergebnisse, Fallback auf Original-Query")
-            results = await pipeline.retrieval.search(query=request.question, collection_ids=search_ids)
-
         if not results:
             logger.warning(f"Keine Ergebnisse für Query '{request.question}' in Collections {search_ids}")
             async def no_results():
@@ -282,7 +279,7 @@ async def ask_question_stream(
             {"content": r.content, "document_name": r.document_name, "page_number": r.page_number}
             for r in results
         ]
-        prompt = pipeline.llm.build_rag_prompt(request.question, contexts)
+        prompt = pipeline.llm.build_rag_prompt(enriched_query, contexts)
 
         # Vollständige Chunk-Kontexte für Debug-Anzeige aufbauen
         rag_chunks = [
@@ -318,6 +315,7 @@ async def ask_question_stream(
                 async for token in pipeline.llm.generate_stream(
                     prompt,
                     system_prompt=pipeline.llm.config.answer_system_prompt,
+                    enable_thinking=request.enable_thinking,
                 ):
                     full_answer += token
                     data = json.dumps({"type": "token", "content": token})

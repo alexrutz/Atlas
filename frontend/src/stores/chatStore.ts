@@ -16,6 +16,7 @@ interface ChatState {
   streamingContent: string
   globalContext: string
   chatMode: ChatMode
+  enableThinking: boolean
 
   loadConversations: () => Promise<void>
   selectConversation: (id: number) => Promise<void>
@@ -31,6 +32,7 @@ interface ChatState {
   updateGlobalContext: (text: string) => Promise<void>
   updateCollectionContext: (collectionId: number, text: string) => Promise<void>
   setChatMode: (mode: ChatMode) => void
+  setEnableThinking: (enabled: boolean) => void
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -43,6 +45,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingContent: '',
   globalContext: '',
   chatMode: 'rag',
+  enableThinking: false,
 
   loadConversations: async () => {
     const conversations = await chatApi.listConversations()
@@ -78,10 +81,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (question) => {
-    const { currentConversationId, selectedCollectionIds, chatMode } = get()
+    const { currentConversationId, selectedCollectionIds, chatMode, enableThinking } = get()
     set({ isLoading: true })
     try {
-      const response = await chatApi.ask(question, currentConversationId ?? undefined, selectedCollectionIds, chatMode)
+      const response = await chatApi.ask(
+        question,
+        currentConversationId ?? undefined,
+        selectedCollectionIds,
+        chatMode,
+        enableThinking,
+      )
 
       const userMsg: Message = {
         id: Date.now(),
@@ -111,7 +120,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessageStream: async (question) => {
-    const { currentConversationId, selectedCollectionIds, chatMode } = get()
+    const { currentConversationId, selectedCollectionIds, chatMode, enableThinking } = get()
 
     const userMsg: Message = {
       id: Date.now(),
@@ -128,7 +137,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }))
 
     try {
-      const response = await chatApi.askStream(question, currentConversationId ?? undefined, selectedCollectionIds, chatMode)
+      const response = await chatApi.askStream(
+        question,
+        currentConversationId ?? undefined,
+        selectedCollectionIds,
+        chatMode,
+        enableThinking,
+      )
 
       if (!response.ok) {
         const errorText = await response.text()
@@ -272,5 +287,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setChatMode: (mode) => {
     set({ chatMode: mode })
+  },
+
+  setEnableThinking: (enabled) => {
+    set({ enableThinking: enabled })
   },
 }))

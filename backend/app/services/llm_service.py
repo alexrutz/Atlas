@@ -31,8 +31,16 @@ class LLMService:
         messages.append({"role": "user", "content": prompt})
         return messages
 
-    def _build_llama_cpp_payload(self, prompt: str, system_prompt: str | None = None, *, stream: bool = False) -> dict:
+    def _build_llama_cpp_payload(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        *,
+        stream: bool = False,
+        enable_thinking: bool | None = None,
+    ) -> dict:
         """Erstellt den Request-Body für llama.cpp inklusive Thinking-Flag."""
+        thinking_enabled = self.config.enable_thinking if enable_thinking is None else enable_thinking
         return {
             "model": self.config.model,
             "messages": self._build_messages(prompt, system_prompt),
@@ -40,7 +48,7 @@ class LLMService:
             "top_p": self.config.top_p,
             "max_tokens": self.config.max_tokens,
             "stream": stream,
-            "chat_template_kwargs": {"enable_thinking": self.config.enable_thinking},
+            "chat_template_kwargs": {"enable_thinking": thinking_enabled},
         }
 
     async def _generate_ollama(self, prompt: str, system_prompt: str | None = None) -> str:
@@ -67,12 +75,17 @@ class LLMService:
             response.raise_for_status()
             return response.json()["response"]
 
-    async def _generate_llama_cpp(self, prompt: str, system_prompt: str | None = None) -> str:
+    async def _generate_llama_cpp(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        enable_thinking: bool | None = None,
+    ) -> str:
         """Generiert Antwort über llama.cpp OpenAI-kompatible API."""
         async with httpx.AsyncClient(timeout=self.config.timeout) as client:
             response = await client.post(
                 f"{self.base_url}/v1/chat/completions",
-                json=self._build_llama_cpp_payload(prompt, system_prompt),
+                json=self._build_llama_cpp_payload(prompt, system_prompt, enable_thinking=enable_thinking),
             )
             response.raise_for_status()
             data = response.json()
@@ -80,7 +93,12 @@ class LLMService:
             self.last_thought_process = message.get("reasoning_content") or message.get("reasoning") or ""
             return message.get("content", "")
 
-    async def generate(self, prompt: str, system_prompt: str | None = None) -> str:
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        enable_thinking: bool | None = None,
+    ) -> str:
         """
         Generiert eine vollständige Antwort (nicht-streaming).
 
@@ -94,7 +112,7 @@ class LLMService:
         self.last_thought_process = ""
         if self.config.provider == "ollama":
             return await self._generate_ollama(prompt, system_prompt)
-        return await self._generate_llama_cpp(prompt, system_prompt)
+        return await self._generate_llama_cpp(prompt, system_prompt, enable_thinking=enable_thinking)
 
     async def _generate_stream_ollama(self, prompt: str, system_prompt: str | None = None) -> AsyncGenerator[str, None]:
         """Streaming-Antwort über Ollama API."""
@@ -126,7 +144,12 @@ class LLMService:
                         if not data.get("done", False):
                             yield data.get("response", "")
 
-    async def _generate_stream_llama_cpp(self, prompt: str, system_prompt: str | None = None) -> AsyncGenerator[str, None]:
+    async def _generate_stream_llama_cpp(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        enable_thinking: bool | None = None,
+    ) -> AsyncGenerator[str, None]:
         """Streaming-Antwort über llama.cpp OpenAI-kompatible API."""
         self.last_thought_process = ""
         thought_parts: list[str] = []
@@ -134,7 +157,9 @@ class LLMService:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/v1/chat/completions",
-                json=self._build_llama_cpp_payload(prompt, system_prompt, stream=True),
+                json=self._build_llama_cpp_payload(
+                    prompt, system_prompt, stream=True, enable_thinking=enable_thinking
+                ),
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -156,7 +181,12 @@ class LLMService:
                     if content:
                         yield content
 
-    async def generate_stream(self, prompt: str, system_prompt: str | None = None) -> AsyncGenerator[str, None]:
+    async def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        enable_thinking: bool | None = None,
+    ) -> AsyncGenerator[str, None]:
         """
         Generiert eine Antwort als Stream (für Server-Sent Events).
 
@@ -172,7 +202,7 @@ class LLMService:
                 yield chunk
             return
 
-        async for chunk in self._generate_stream_llama_cpp(prompt, system_prompt):
+        async for chunk in self._generate_stream_llama_cpp(prompt, system_prompt, enable_thinking=enable_thinking):
             yield chunk
 
     def build_rag_prompt(self, question: str, contexts: list[dict]) -> str:

@@ -43,6 +43,7 @@ class RAGPipeline:
         conversation_id: int | None = None,
         collection_ids: list[int] | None = None,
         mode: ChatMode = ChatMode.rag,
+        enable_thinking: bool | None = None,
     ) -> ChatResponse:
         """
         Verarbeitet eine Benutzerfrage durch die RAG-Pipeline.
@@ -57,7 +58,11 @@ class RAGPipeline:
             ChatResponse mit Antwort und Quellen
         """
         if mode == ChatMode.chat:
-            answer = await self.llm.generate(question, system_prompt=settings.llm.answer_system_prompt)
+            answer = await self.llm.generate(
+                question,
+                system_prompt=settings.llm.answer_system_prompt,
+                enable_thinking=enable_thinking,
+            )
             conv_id = await self._save_to_conversation(
                 user=user,
                 conversation_id=conversation_id,
@@ -100,11 +105,6 @@ class RAGPipeline:
         logger.info(f"Suche in Collections: {search_ids}")
         results = await self.retrieval.search(query=enriched_query, collection_ids=search_ids)
 
-        # Fallback: Bei leeren Ergebnissen mit Original-Query erneut suchen
-        if not results and enriched_query != question:
-            logger.info("Angereicherte Query lieferte keine Ergebnisse, Fallback auf Original-Query")
-            results = await self.retrieval.search(query=question, collection_ids=search_ids)
-
         if not results:
             logger.warning(f"Keine Ergebnisse für Query '{question}' in Collections {search_ids}")
             return ChatResponse(
@@ -113,7 +113,7 @@ class RAGPipeline:
                 sources=[],
             )
 
-        # 4. LLM-Prompt bauen (mit Original-Frage, nicht angereicherter Query)
+        # 4. LLM-Prompt bauen (mit angereicherter Query)
         contexts = [
             {
                 "content": r.content,
@@ -122,10 +122,14 @@ class RAGPipeline:
             }
             for r in results
         ]
-        prompt = self.llm.build_rag_prompt(question, contexts)
+        prompt = self.llm.build_rag_prompt(enriched_query, contexts)
 
         # 5. Antwort generieren
-        answer = await self.llm.generate(prompt, system_prompt=settings.llm.answer_system_prompt)
+        answer = await self.llm.generate(
+            prompt,
+            system_prompt=settings.llm.answer_system_prompt,
+            enable_thinking=enable_thinking,
+        )
 
         # 6. Konversation speichern
         rag_chunks = [
