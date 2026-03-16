@@ -2,13 +2,21 @@
 
 from datetime import datetime
 
+from enum import Enum
+
 from pydantic import BaseModel
+
+
+class ChatMode(str, Enum):
+    rag = "rag"
+    chat = "chat"
 
 
 class ChatRequest(BaseModel):
     question: str
     conversation_id: int | None = None
     collection_ids: list[int] | None = None  # Override für ausgewählte Collections
+    mode: ChatMode = ChatMode.rag
 
 
 class ChatResponse(BaseModel):

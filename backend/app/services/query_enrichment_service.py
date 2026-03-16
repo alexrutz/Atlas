@@ -108,7 +108,10 @@ class QueryEnrichmentService:
         )
 
         try:
-            enriched_query = (await self.llm_service.generate(prompt, system_prompt="")).strip()
+            enriched_query = (await self.llm_service.generate(
+                prompt,
+                system_prompt=self.config.system_prompt,
+            )).strip()
 
             if enriched_query:
                 logger.info(

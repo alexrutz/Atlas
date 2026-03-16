@@ -22,7 +22,7 @@ from app.models.group import UserGroup
 from app.services.retrieval_service import RetrievalService
 from app.services.llm_service import LLMService
 from app.services.query_enrichment_service import QueryEnrichmentService
-from app.schemas.chat import ChatResponse, SourceChunk
+from app.schemas.chat import ChatResponse, SourceChunk, ChatMode
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class RAGPipeline:
         user: User,
         conversation_id: int | None = None,
         collection_ids: list[int] | None = None,
+        mode: ChatMode = ChatMode.rag,
     ) -> ChatResponse:
         """
         Verarbeitet eine Benutzerfrage durch die RAG-Pipeline.
@@ -55,6 +56,18 @@ class RAGPipeline:
         Returns:
             ChatResponse mit Antwort und Quellen
         """
+        if mode == ChatMode.chat:
+            answer = await self.llm.generate(question, system_prompt=settings.llm.answer_system_prompt)
+            conv_id = await self._save_to_conversation(
+                user=user,
+                conversation_id=conversation_id,
+                question=question,
+                answer=answer,
+                results=[],
+                search_ids=[],
+            )
+            return ChatResponse(answer=answer, conversation_id=conv_id, sources=[])
+
         # 1. Erlaubte Collections ermitteln
         allowed_ids = await self._get_allowed_collection_ids(user)
         if not allowed_ids:
@@ -111,7 +124,7 @@ class RAGPipeline:
         prompt = self.llm.build_rag_prompt(question, contexts)
 
         # 5. Antwort generieren
-        answer = await self.llm.generate(prompt)
+        answer = await self.llm.generate(prompt, system_prompt=settings.llm.answer_system_prompt)
 
         # 6. Konversation speichern
         rag_chunks = [

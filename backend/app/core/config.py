@@ -69,6 +69,7 @@ class LLMConfig(BaseModel):
     num_threads: int = 8
     timeout: int = 120
     system_prompt: str = ""
+    answer_system_prompt: str = ""
 
 
 class EmbeddingConfig(BaseModel):
@@ -91,6 +92,10 @@ class ChunkingConfig(BaseModel):
 
 class QueryEnrichmentConfig(BaseModel):
     enabled: bool = True
+    system_prompt: str = (
+        "Du optimierst ausschließlich Suchanfragen für ein Retrieval-System. "
+        "Antworte immer nur mit der finalen Suchanfrage ohne Zusatztext."
+    )
     prompt_template: str = (
         "Du erhältst eine Benutzeranfrage und Kontext-Beschreibungen "
         "aus Firmendokumenten. Deine Aufgabe: Erweitere die Anfrage um relevante Fachbegriffe "

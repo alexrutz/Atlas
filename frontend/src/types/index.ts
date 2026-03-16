@@ -76,6 +76,8 @@ export interface Document {
 }
 
 // --- Chat ---
+export type ChatMode = 'rag' | 'chat'
+
 export interface Conversation {
   id: number
   title: string | null
