@@ -58,6 +58,7 @@ class MessageResponse(BaseModel):
     sources: list[SourceChunk] = []
     enriched_query: str | None = None
     rag_chunks: list[RagChunk] = []
+    thought_process: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

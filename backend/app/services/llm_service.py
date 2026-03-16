@@ -20,6 +20,7 @@ class LLMService:
     def __init__(self):
         self.config = settings.llm
         self.base_url = self.config.base_url
+        self.last_thought_process = ""
 
     def _build_messages(self, prompt: str, system_prompt: str | None = None) -> list[dict[str, str]]:
         """Erstellt OpenAI-kompatible Message-Struktur für llama.cpp."""
@@ -29,6 +30,18 @@ class LLMService:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         return messages
+
+    def _build_llama_cpp_payload(self, prompt: str, system_prompt: str | None = None, *, stream: bool = False) -> dict:
+        """Erstellt den Request-Body für llama.cpp inklusive Thinking-Flag."""
+        return {
+            "model": self.config.model,
+            "messages": self._build_messages(prompt, system_prompt),
+            "temperature": self.config.temperature,
+            "top_p": self.config.top_p,
+            "max_tokens": self.config.max_tokens,
+            "stream": stream,
+            "chat_template_kwargs": {"enable_thinking": self.config.enable_thinking},
+        }
 
     async def _generate_ollama(self, prompt: str, system_prompt: str | None = None) -> str:
         """Generiert Antwort über die Ollama /api/generate API."""
@@ -59,17 +72,13 @@ class LLMService:
         async with httpx.AsyncClient(timeout=self.config.timeout) as client:
             response = await client.post(
                 f"{self.base_url}/v1/chat/completions",
-                json={
-                    "model": self.config.model,
-                    "messages": self._build_messages(prompt, system_prompt),
-                    "temperature": self.config.temperature,
-                    "top_p": self.config.top_p,
-                    "max_tokens": self.config.max_tokens,
-                },
+                json=self._build_llama_cpp_payload(prompt, system_prompt),
             )
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            self.last_thought_process = message.get("reasoning_content") or message.get("reasoning") or ""
+            return message.get("content", "")
 
     async def generate(self, prompt: str, system_prompt: str | None = None) -> str:
         """
@@ -82,12 +91,14 @@ class LLMService:
         Returns:
             Die generierte Antwort als String
         """
+        self.last_thought_process = ""
         if self.config.provider == "ollama":
             return await self._generate_ollama(prompt, system_prompt)
         return await self._generate_llama_cpp(prompt, system_prompt)
 
     async def _generate_stream_ollama(self, prompt: str, system_prompt: str | None = None) -> AsyncGenerator[str, None]:
         """Streaming-Antwort über Ollama API."""
+        self.last_thought_process = ""
         system = system_prompt or self.config.system_prompt
 
         async with httpx.AsyncClient(timeout=self.config.timeout) as client:
@@ -117,18 +128,13 @@ class LLMService:
 
     async def _generate_stream_llama_cpp(self, prompt: str, system_prompt: str | None = None) -> AsyncGenerator[str, None]:
         """Streaming-Antwort über llama.cpp OpenAI-kompatible API."""
+        self.last_thought_process = ""
+        thought_parts: list[str] = []
         async with httpx.AsyncClient(timeout=self.config.timeout) as client:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/v1/chat/completions",
-                json={
-                    "model": self.config.model,
-                    "messages": self._build_messages(prompt, system_prompt),
-                    "temperature": self.config.temperature,
-                    "top_p": self.config.top_p,
-                    "max_tokens": self.config.max_tokens,
-                    "stream": True,
-                },
+                json=self._build_llama_cpp_payload(prompt, system_prompt, stream=True),
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -141,6 +147,11 @@ class LLMService:
 
                     data = json.loads(payload)
                     delta = data.get("choices", [{}])[0].get("delta", {})
+                    reasoning = delta.get("reasoning_content") or delta.get("reasoning") or ""
+                    if reasoning:
+                        thought_parts.append(reasoning)
+                        self.last_thought_process = "".join(thought_parts)
+
                     content = delta.get("content", "")
                     if content:
                         yield content

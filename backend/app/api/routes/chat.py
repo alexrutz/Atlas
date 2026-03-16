@@ -141,6 +141,7 @@ async def get_conversation_messages(
             sources=sources,
             enriched_query=msg.metadata_.get("enriched_query") if msg.metadata_ else None,
             rag_chunks=msg.metadata_.get("rag_chunks", []) if msg.metadata_ else [],
+            thought_process=msg.metadata_.get("thought_process") if msg.metadata_ else None,
             created_at=msg.created_at,
         ))
     return response
@@ -193,6 +194,7 @@ async def ask_question_stream(
                         data = json.dumps({"type": "token", "content": token})
                         yield f"data: {data}\n\n"
 
+                    thought_process = pipeline.llm.last_thought_process
                     conv_id = await pipeline._save_to_conversation(
                         user=current_user,
                         conversation_id=request.conversation_id,
@@ -200,9 +202,14 @@ async def ask_question_stream(
                         answer=full_answer,
                         results=[],
                         search_ids=[],
+                        thought_process=thought_process,
                     )
                     await db.commit()
-                    done_data = json.dumps({"type": "done", "conversation_id": conv_id})
+                    done_data = json.dumps({
+                        "type": "done",
+                        "conversation_id": conv_id,
+                        "thought_process": thought_process,
+                    })
                     yield f"data: {done_data}\n\n"
                 except Exception as e:
                     logger.error(f"Streaming-Fehler (chat only): {e}", exc_info=True)
@@ -317,6 +324,7 @@ async def ask_question_stream(
                     yield f"data: {data}\n\n"
 
                 # Konversation speichern
+                thought_process = pipeline.llm.last_thought_process
                 conv_id = await pipeline._save_to_conversation(
                     user=current_user,
                     conversation_id=request.conversation_id,
@@ -326,10 +334,15 @@ async def ask_question_stream(
                     search_ids=search_ids,
                     enriched_query=enriched_query,
                     rag_chunks=rag_chunks,
+                    thought_process=thought_process,
                 )
                 await db.commit()
 
-                done_data = json.dumps({"type": "done", "conversation_id": conv_id})
+                done_data = json.dumps({
+                    "type": "done",
+                    "conversation_id": conv_id,
+                    "thought_process": thought_process,
+                })
                 yield f"data: {done_data}\n\n"
             except Exception as e:
                 logger.error(f"Streaming-Fehler: {e}", exc_info=True)

@@ -65,6 +65,7 @@ class RAGPipeline:
                 answer=answer,
                 results=[],
                 search_ids=[],
+                thought_process=self.llm.last_thought_process,
             )
             return ChatResponse(answer=answer, conversation_id=conv_id, sources=[])
 
@@ -146,6 +147,7 @@ class RAGPipeline:
             search_ids=search_ids,
             enriched_query=enriched_query,
             rag_chunks=rag_chunks,
+            thought_process=self.llm.last_thought_process,
         )
 
         # 7. Response zusammenbauen
@@ -195,6 +197,7 @@ class RAGPipeline:
         question: str, answer: str, results, search_ids: list[int],
         enriched_query: str | None = None,
         rag_chunks: list[dict] | None = None,
+        thought_process: str | None = None,
     ) -> int:
         """Speichert Frage und Antwort in der Konversation."""
         if conversation_id:
@@ -226,6 +229,8 @@ class RAGPipeline:
         assistant_metadata = {}
         if rag_chunks:
             assistant_metadata["rag_chunks"] = rag_chunks
+        if thought_process:
+            assistant_metadata["thought_process"] = thought_process
         assistant_msg = Message(
             conversation_id=conv.id, role="assistant", content=answer,
             source_chunks=[r.chunk_id for r in results],
