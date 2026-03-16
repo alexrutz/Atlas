@@ -8,7 +8,7 @@
 import axios from 'axios'
 import type {
   LoginResponse, Collection, Document, AccessInfo,
-  Conversation, Message, ChatResponse, Group, UserDetail,
+  Conversation, Message, ChatResponse, Group, UserDetail, ChatMode,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -212,9 +212,9 @@ export const chatApi = {
   deleteConversation: (id: number) => api.delete(`/conversations/${id}`),
   getMessages: (conversationId: number) =>
     api.get<Message[]>(`/conversations/${conversationId}/messages`).then(r => r.data),
-  ask: (question: string, conversationId?: number, collectionIds?: number[]) =>
-    api.post<ChatResponse>('/chat', { question, conversation_id: conversationId, collection_ids: collectionIds }).then(r => r.data),
-  askStream: (question: string, conversationId?: number, collectionIds?: number[]) => {
+  ask: (question: string, conversationId?: number, collectionIds?: number[], mode: ChatMode = 'rag') =>
+    api.post<ChatResponse>('/chat', { question, conversation_id: conversationId, collection_ids: collectionIds, mode }).then(r => r.data),
+  askStream: (question: string, conversationId?: number, collectionIds?: number[], mode: ChatMode = 'rag') => {
     const token = localStorage.getItem('atlas_token')
     return fetch('/api/chat/stream', {
       method: 'POST',
@@ -222,7 +222,7 @@ export const chatApi = {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ question, conversation_id: conversationId, collection_ids: collectionIds }),
+      body: JSON.stringify({ question, conversation_id: conversationId, collection_ids: collectionIds, mode }),
     })
   },
   updateSelectedCollections: (collectionIds: number[]) =>

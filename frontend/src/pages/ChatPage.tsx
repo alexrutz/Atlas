@@ -188,11 +188,11 @@ function DebugPanel({
 export default function ChatPage() {
   const {
     conversations, currentConversationId, messages, collections,
-    selectedCollectionIds, isLoading, streamingContent, globalContext,
+    selectedCollectionIds, isLoading, streamingContent, globalContext, chatMode,
     loadConversations, selectConversation,
     deleteConversation, loadCollections, toggleCollection,
     sendMessageStream, clearChat, loadGlobalContext,
-    updateGlobalContext,
+    updateGlobalContext, setChatMode,
   } = useChatStore()
 
   const [input, setInput] = useState('')
@@ -395,6 +395,30 @@ export default function ChatPage() {
           )}
         </div>
 
+
+        {/* Chat-Modus */}
+        <div className="mb-3 pb-3 border-b border-gray-200">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Modus</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setChatMode('rag')}
+              className={`px-2 py-1.5 text-xs rounded border transition ${chatMode === 'rag'
+                ? 'bg-atlas-600 text-white border-atlas-600'
+                : 'bg-white text-gray-600 border-gray-300 hover:border-atlas-300'}`}
+            >
+              RAG
+            </button>
+            <button
+              onClick={() => setChatMode('chat')}
+              className={`px-2 py-1.5 text-xs rounded border transition ${chatMode === 'chat'
+                ? 'bg-atlas-600 text-white border-atlas-600'
+                : 'bg-white text-gray-600 border-gray-300 hover:border-atlas-300'}`}
+            >
+              Nur Chat
+            </button>
+          </div>
+        </div>
+
         {/* Collections */}
         <h3 className="font-semibold text-sm text-gray-500 uppercase mb-3">Collections</h3>
         {collections.length === 0 && (
@@ -424,8 +448,8 @@ export default function ChatPage() {
             <div className="text-center text-gray-400 mt-20">
               <div className="text-5xl mb-4">&#128218;</div>
               <h2 className="text-xl font-medium">Willkommen bei Atlas</h2>
-              <p className="mt-2">Stellen Sie eine Frage zu Ihren Dokumenten.</p>
-              {selectedCollectionIds.length === 0 && (
+              <p className="mt-2">{chatMode === 'rag' ? 'Stellen Sie eine Frage zu Ihren Dokumenten.' : 'Stellen Sie eine freie Frage an das Modell.'}</p>
+              {chatMode === 'rag' && selectedCollectionIds.length === 0 && (
                 <p className="mt-4 text-sm text-amber-500">
                   Bitte wählen Sie mindestens eine Collection aus.
                 </p>
@@ -449,7 +473,7 @@ export default function ChatPage() {
                 <SourcesPanel sources={msg.sources} />
               </div>
               {/* Debug-Panel unter jeder Assistenten-Nachricht */}
-              {msg.role === 'assistant' && (
+              {chatMode === 'rag' && msg.role === 'assistant' && (
                 <div className="max-w-3xl w-full">
                   <DebugPanel
                     enrichedQuery={msg.enriched_query}
@@ -503,7 +527,7 @@ export default function ChatPage() {
             />
             <button
               onClick={handleSend}
-              disabled={isLoading || !input.trim() || selectedCollectionIds.length === 0}
+              disabled={isLoading || !input.trim() || (chatMode === 'rag' && selectedCollectionIds.length === 0)}
               className="px-6 py-3 bg-atlas-600 text-white rounded-lg hover:bg-atlas-700 disabled:opacity-50 transition"
             >
               Senden

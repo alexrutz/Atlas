@@ -14,7 +14,7 @@ from app.models.user import User
 from app.models.conversation import Conversation, Message, UserSelectedCollection
 from app.schemas.chat import (
     ChatRequest, ChatResponse, ConversationResponse,
-    MessageResponse, SelectedCollectionsUpdate, SourceChunk,
+    MessageResponse, SelectedCollectionsUpdate, SourceChunk, ChatMode,
 )
 from app.services.rag_pipeline import RAGPipeline
 
@@ -160,6 +160,7 @@ async def ask_question(
             user=current_user,
             conversation_id=request.conversation_id,
             collection_ids=request.collection_ids,
+            mode=request.mode,
         )
         return result
     except Exception as e:
@@ -180,6 +181,44 @@ async def ask_question_stream(
     pipeline = RAGPipeline(db)
 
     try:
+        if request.mode == ChatMode.chat:
+            async def chat_only_stream():
+                full_answer = ""
+                try:
+                    async for token in pipeline.llm.generate_stream(
+                        request.question,
+                        system_prompt=pipeline.llm.config.answer_system_prompt,
+                    ):
+                        full_answer += token
+                        data = json.dumps({"type": "token", "content": token})
+                        yield f"data: {data}\n\n"
+
+                    conv_id = await pipeline._save_to_conversation(
+                        user=current_user,
+                        conversation_id=request.conversation_id,
+                        question=request.question,
+                        answer=full_answer,
+                        results=[],
+                        search_ids=[],
+                    )
+                    await db.commit()
+                    done_data = json.dumps({"type": "done", "conversation_id": conv_id})
+                    yield f"data: {done_data}\n\n"
+                except Exception as e:
+                    logger.error(f"Streaming-Fehler (chat only): {e}", exc_info=True)
+                    error_data = json.dumps({"type": "error", "content": str(e)})
+                    yield f"data: {error_data}\n\n"
+
+            return StreamingResponse(
+                chat_only_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+
         # Retrieval durchführen (nicht-streaming Teil)
         allowed_ids = await pipeline._get_allowed_collection_ids(current_user)
         if not allowed_ids:
@@ -269,7 +308,10 @@ async def ask_question_stream(
                 yield f"data: {sources_data}\n\n"
 
                 # Streaming-Antwort
-                async for token in pipeline.llm.generate_stream(prompt):
+                async for token in pipeline.llm.generate_stream(
+                    prompt,
+                    system_prompt=pipeline.llm.config.answer_system_prompt,
+                ):
                     full_answer += token
                     data = json.dumps({"type": "token", "content": token})
                     yield f"data: {data}\n\n"

@@ -65,6 +65,10 @@ llm:
     Wenn du etwas nicht in den Dokumenten findest, sage das ehrlich.
     Antworte auf Deutsch, es sei denn, der Benutzer stellt die Frage auf Englisch.
     Zitiere immer die Quellen deiner Antwort.
+  answer_system_prompt: |
+    Du bist Atlas, ein hilfreicher KI-Assistent.
+    Gib präzise, korrekte und gut strukturierte Antworten.
+    Wenn wichtige Informationen fehlen, benenne Unsicherheiten transparent.
 
 # -----------------------------------------------------------------------------
 # Embedding-Konfiguration
@@ -107,6 +111,9 @@ retrieval:
   # bevor die Retrieval-Suche ausgeführt wird
   query_enrichment:
     enabled: true                       # Query-Anreicherung aktivieren
+    system_prompt: |
+      Du optimierst ausschließlich Suchanfragen für ein Retrieval-System.
+      Antworte nur mit der finalen Suchanfrage ohne Erklärungen.
 
 # -----------------------------------------------------------------------------
 # Unterstützte Dateiformate

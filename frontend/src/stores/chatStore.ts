@@ -3,7 +3,7 @@
  */
 
 import { create } from 'zustand'
-import type { Conversation, Message, Collection, ChatResponse, SourceChunk, RagChunk } from '../types'
+import type { Conversation, Message, Collection, ChatResponse, SourceChunk, RagChunk, ChatMode } from '../types'
 import { chatApi, collectionsApi, settingsApi } from '../services/api'
 
 interface ChatState {
@@ -15,6 +15,7 @@ interface ChatState {
   isLoading: boolean
   streamingContent: string
   globalContext: string
+  chatMode: ChatMode
 
   loadConversations: () => Promise<void>
   selectConversation: (id: number) => Promise<void>
@@ -29,6 +30,7 @@ interface ChatState {
   loadGlobalContext: () => Promise<void>
   updateGlobalContext: (text: string) => Promise<void>
   updateCollectionContext: (collectionId: number, text: string) => Promise<void>
+  setChatMode: (mode: ChatMode) => void
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -40,6 +42,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isLoading: false,
   streamingContent: '',
   globalContext: '',
+  chatMode: 'rag',
 
   loadConversations: async () => {
     const conversations = await chatApi.listConversations()
@@ -75,10 +78,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (question) => {
-    const { currentConversationId, selectedCollectionIds } = get()
+    const { currentConversationId, selectedCollectionIds, chatMode } = get()
     set({ isLoading: true })
     try {
-      const response = await chatApi.ask(question, currentConversationId ?? undefined, selectedCollectionIds)
+      const response = await chatApi.ask(question, currentConversationId ?? undefined, selectedCollectionIds, chatMode)
 
       const userMsg: Message = {
         id: Date.now(),
@@ -108,7 +111,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessageStream: async (question) => {
-    const { currentConversationId, selectedCollectionIds } = get()
+    const { currentConversationId, selectedCollectionIds, chatMode } = get()
 
     const userMsg: Message = {
       id: Date.now(),
@@ -125,7 +128,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }))
 
     try {
-      const response = await chatApi.askStream(question, currentConversationId ?? undefined, selectedCollectionIds)
+      const response = await chatApi.askStream(question, currentConversationId ?? undefined, selectedCollectionIds, chatMode)
 
       if (!response.ok) {
         const errorText = await response.text()
@@ -262,5 +265,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         c.id === collectionId ? { ...c, context_text: text } : c
       ),
     }))
+  },
+
+  setChatMode: (mode) => {
+    set({ chatMode: mode })
   },
 }))
