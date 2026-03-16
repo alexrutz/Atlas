@@ -149,6 +149,7 @@ export const documentsApi = {
 export interface ModelConfig {
   llm_model: string
   embedding_model: string
+  llm_enable_thinking: boolean
 }
 
 export interface OllamaModel {
@@ -164,7 +165,7 @@ export const settingsApi = {
     api.put<{ context_text: string }>('/settings/global-context', { context_text: contextText }).then(r => r.data),
   getModelConfig: () =>
     api.get<ModelConfig>('/settings/models').then(r => r.data),
-  updateModelConfig: (data: { llm_model?: string; embedding_model?: string }) =>
+  updateModelConfig: (data: { llm_model?: string; embedding_model?: string; llm_enable_thinking?: boolean }) =>
     api.put<ModelConfig>('/settings/models', data).then(r => r.data),
   getAvailableModels: () =>
     api.get<{ models: OllamaModel[] }>('/settings/models/available').then(r => r.data),

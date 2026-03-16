@@ -144,6 +144,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let conversationId = currentConversationId
       let enrichedQuery: string | null = null
       let ragChunks: RagChunk[] = []
+      let thoughtProcess: string | null = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -176,6 +177,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               sources = event.sources
             } else if (event.type === 'done') {
               conversationId = event.conversation_id
+              thoughtProcess = event.thought_process || null
             } else if (event.type === 'error') {
               throw new Error(event.content)
             }
@@ -193,6 +195,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         sources,
         enriched_query: enrichedQuery,
         rag_chunks: ragChunks,
+        thought_process: thoughtProcess,
         created_at: new Date().toISOString(),
       }
 

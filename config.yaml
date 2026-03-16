@@ -53,8 +53,9 @@ llm:
   temperature: 0.1                    # Kreativität (0.0 = deterministisch)
   top_p: 0.9                         # Nucleus Sampling
   top_k: 40                          # Top-K Sampling
-  max_tokens: 4096                    # Maximale Antwortlänge
-  context_window: 8192                # Kontextfenster des Modells
+  max_tokens: 65536                   # Maximale Antwortlänge
+  context_window: 65536               # Kontextfenster des Modells
+  enable_thinking: false             # Schaltet Denken im Chat-Template ein/aus
   repeat_penalty: 1.1                 # Wiederholungsstrafe
   num_gpu: 1                          # Anzahl GPUs
   num_threads: 8                      # CPU Threads (falls CPU-Inferenz)

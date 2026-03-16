@@ -40,11 +40,13 @@ class GlobalContextResponse(BaseModel):
 class ModelConfigResponse(BaseModel):
     llm_model: str
     embedding_model: str
+    llm_enable_thinking: bool
 
 
 class ModelConfigUpdate(BaseModel):
     llm_model: str | None = None
     embedding_model: str | None = None
+    llm_enable_thinking: bool | None = None
 
 
 class OllamaModel(BaseModel):
@@ -158,6 +160,7 @@ async def get_model_config(
         return ModelConfigResponse(
             llm_model=config.get("llm", {}).get("model", ""),
             embedding_model=config.get("embedding", {}).get("model", ""),
+            llm_enable_thinking=config.get("llm", {}).get("enable_thinking", False),
         )
     except Exception as e:
         logger.error(f"Fehler beim Lesen der Konfiguration: {e}")
@@ -182,6 +185,8 @@ async def update_model_config(
             config.setdefault("llm", {})["model"] = data.llm_model
         if data.embedding_model:
             config.setdefault("embedding", {})["model"] = data.embedding_model
+        if data.llm_enable_thinking is not None:
+            config.setdefault("llm", {})["enable_thinking"] = data.llm_enable_thinking
 
         with open(CONFIG_PATH, "w") as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -192,10 +197,13 @@ async def update_model_config(
             settings.llm.model = data.llm_model
         if data.embedding_model:
             settings.embedding.model = data.embedding_model
+        if data.llm_enable_thinking is not None:
+            settings.llm.enable_thinking = data.llm_enable_thinking
 
         return ModelConfigResponse(
             llm_model=config["llm"]["model"],
             embedding_model=config["embedding"]["model"],
+            llm_enable_thinking=config.get("llm", {}).get("enable_thinking", False),
         )
     except Exception as e:
         logger.error(f"Fehler beim Aktualisieren der Modell-Konfiguration: {e}")

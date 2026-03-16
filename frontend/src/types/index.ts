@@ -100,6 +100,7 @@ export interface Message {
   sources: SourceChunk[]
   enriched_query?: string | null
   rag_chunks?: RagChunk[]
+  thought_process?: string | null
   created_at: string
 }
 

@@ -63,7 +63,9 @@ function SourcesPanel({ sources }: { sources: SourceChunk[] }) {
                       style={{ width: `${Math.round(src.similarity_score * 100)}%` }}
                     />
                   </div>
-                  <span className="text-[10px] text-gray-400">{Math.round(src.similarity_score * 100)}%</span>
+                  <span className="text-[10px] text-gray-400">
+                    {Math.round(src.similarity_score * 100)}% ({src.similarity_score.toFixed(4)})
+                  </span>
                 </div>
               )}
             </div>
@@ -82,17 +84,34 @@ function DebugPanel({
   enrichedQuery,
   originalQuery,
   ragChunks,
+  thoughtProcess,
 }: {
   enrichedQuery?: string | null
   originalQuery?: string
   ragChunks?: RagChunk[]
+  thoughtProcess?: string | null
 }) {
   const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'query' | 'chunks'>('query')
+  const [activeTab, setActiveTab] = useState<'query' | 'chunks' | 'thoughts'>('query')
 
   const hasQuery = !!enrichedQuery || !!originalQuery
   const hasChunks = ragChunks && ragChunks.length > 0
-  if (!hasQuery && !hasChunks) return null
+  const hasThoughts = !!thoughtProcess
+
+  useEffect(() => {
+    if (activeTab === 'query' && !hasQuery) {
+      if (hasChunks) setActiveTab('chunks')
+      else if (hasThoughts) setActiveTab('thoughts')
+    } else if (activeTab === 'chunks' && !hasChunks) {
+      if (hasQuery) setActiveTab('query')
+      else if (hasThoughts) setActiveTab('thoughts')
+    } else if (activeTab === 'thoughts' && !hasThoughts) {
+      if (hasQuery) setActiveTab('query')
+      else if (hasChunks) setActiveTab('chunks')
+    }
+  }, [activeTab, hasQuery, hasChunks, hasThoughts])
+
+  if (!hasQuery && !hasChunks && !hasThoughts) return null
 
   return (
     <div className="mt-1">
@@ -134,6 +153,18 @@ function DebugPanel({
                 Chunks ({ragChunks!.length})
               </button>
             )}
+            {hasThoughts && (
+              <button
+                onClick={() => setActiveTab('thoughts')}
+                className={`px-3 py-1.5 text-xs font-medium transition ${
+                  activeTab === 'thoughts'
+                    ? 'text-atlas-700 border-b-2 border-atlas-500 bg-white'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Thought Process
+              </button>
+            )}
           </div>
 
           {/* Tab Content */}
@@ -167,11 +198,19 @@ function DebugPanel({
                       <span className="font-medium text-gray-700">{chunk.document_name}</span>
                       {chunk.page_number && <span className="text-gray-400">S. {chunk.page_number}</span>}
                       <span className="text-gray-400">{chunk.collection_name}</span>
-                      <span className="ml-auto text-gray-400">{Math.round(chunk.similarity_score * 100)}%</span>
+                      <span className="ml-auto text-gray-400">
+                        {Math.round(chunk.similarity_score * 100)}% ({chunk.similarity_score.toFixed(4)})
+                      </span>
                     </div>
                     <p className="whitespace-pre-wrap text-gray-600 text-[11px] leading-relaxed">{chunk.content}</p>
                   </div>
                 ))}
+              </div>
+            )}
+            {activeTab === 'thoughts' && hasThoughts && (
+              <div className="space-y-2">
+                <span className="font-semibold text-gray-500 block mb-0.5">Gedankenprozess:</span>
+                <p className="bg-white border rounded p-2 whitespace-pre-wrap text-gray-700">{thoughtProcess}</p>
               </div>
             )}
           </div>
@@ -220,7 +259,7 @@ export default function ChatPage() {
     setShowModelConfig(!showModelConfig)
   }, [showModelConfig, availableModels.length])
 
-  const handleModelChange = useCallback(async (field: 'llm_model' | 'embedding_model', value: string) => {
+  const handleModelChange = useCallback(async (field: 'llm_model' | 'embedding_model' | 'llm_enable_thinking', value: string | boolean) => {
     if (!modelConfig) return
     setModelSaving(true)
     try {
@@ -388,6 +427,16 @@ export default function ChatPage() {
                   ))}
                 </select>
               </div>
+              <label className="flex items-center justify-between text-xs text-gray-600 bg-gray-50 border rounded px-2 py-1.5">
+                <span>Thinking (llama.cpp)</span>
+                <input
+                  type="checkbox"
+                  checked={modelConfig.llm_enable_thinking}
+                  onChange={(e) => handleModelChange('llm_enable_thinking', e.target.checked)}
+                  disabled={modelSaving}
+                  className="h-3.5 w-3.5"
+                />
+              </label>
               {modelSaving && (
                 <p className="text-[10px] text-atlas-600">Speichern...</p>
               )}
@@ -479,6 +528,7 @@ export default function ChatPage() {
                     enrichedQuery={msg.enriched_query}
                     originalQuery={getOriginalQuery(idx)}
                     ragChunks={msg.rag_chunks}
+                    thoughtProcess={msg.thought_process}
                   />
                 </div>
               )}
