@@ -227,11 +227,11 @@ function DebugPanel({
 export default function ChatPage() {
   const {
     conversations, currentConversationId, messages, collections,
-    selectedCollectionIds, isLoading, streamingContent, globalContext, chatMode,
+    selectedCollectionIds, isLoading, streamingContent, globalContext, chatMode, enableThinking,
     loadConversations, selectConversation,
     deleteConversation, loadCollections, toggleCollection,
     sendMessageStream, clearChat, loadGlobalContext,
-    updateGlobalContext, setChatMode,
+    updateGlobalContext, setChatMode, setEnableThinking,
   } = useChatStore()
 
   const [input, setInput] = useState('')
@@ -247,8 +247,8 @@ export default function ChatPage() {
     loadCollections()
     loadConversations()
     loadGlobalContext()
-    settingsApi.getModelConfig().then(setModelConfig).catch(() => {})
-  }, [loadCollections, loadConversations, loadGlobalContext])
+    settingsApi.getModelConfig().then((cfg) => { setModelConfig(cfg); setEnableThinking(cfg.llm_enable_thinking) }).catch(() => {})
+  }, [loadCollections, loadConversations, loadGlobalContext, setEnableThinking])
 
   const handleToggleModelConfig = useCallback(() => {
     if (!showModelConfig && availableModels.length === 0) {
@@ -259,7 +259,7 @@ export default function ChatPage() {
     setShowModelConfig(!showModelConfig)
   }, [showModelConfig, availableModels.length])
 
-  const handleModelChange = useCallback(async (field: 'llm_model' | 'embedding_model' | 'llm_enable_thinking', value: string | boolean) => {
+  const handleModelChange = useCallback(async (field: 'llm_model' | 'embedding_model', value: string) => {
     if (!modelConfig) return
     setModelSaving(true)
     try {
@@ -427,16 +427,6 @@ export default function ChatPage() {
                   ))}
                 </select>
               </div>
-              <label className="flex items-center justify-between text-xs text-gray-600 bg-gray-50 border rounded px-2 py-1.5">
-                <span>Thinking (llama.cpp)</span>
-                <input
-                  type="checkbox"
-                  checked={modelConfig.llm_enable_thinking}
-                  onChange={(e) => handleModelChange('llm_enable_thinking', e.target.checked)}
-                  disabled={modelSaving}
-                  className="h-3.5 w-3.5"
-                />
-              </label>
               {modelSaving && (
                 <p className="text-[10px] text-atlas-600">Speichern...</p>
               )}
@@ -565,6 +555,17 @@ export default function ChatPage() {
 
         {/* Eingabefeld */}
         <div className="border-t p-4 bg-white">
+          <div className="max-w-4xl mx-auto mb-2 flex items-center justify-end">
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                checked={enableThinking}
+                onChange={(e) => setEnableThinking(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Thinking
+            </label>
+          </div>
           <div className="flex gap-3 max-w-4xl mx-auto">
             <input
               type="text"

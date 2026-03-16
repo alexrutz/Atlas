@@ -213,9 +213,27 @@ export const chatApi = {
   deleteConversation: (id: number) => api.delete(`/conversations/${id}`),
   getMessages: (conversationId: number) =>
     api.get<Message[]>(`/conversations/${conversationId}/messages`).then(r => r.data),
-  ask: (question: string, conversationId?: number, collectionIds?: number[], mode: ChatMode = 'rag') =>
-    api.post<ChatResponse>('/chat', { question, conversation_id: conversationId, collection_ids: collectionIds, mode }).then(r => r.data),
-  askStream: (question: string, conversationId?: number, collectionIds?: number[], mode: ChatMode = 'rag') => {
+  ask: (
+    question: string,
+    conversationId?: number,
+    collectionIds?: number[],
+    mode: ChatMode = 'rag',
+    enableThinking?: boolean,
+  ) =>
+    api.post<ChatResponse>('/chat', {
+      question,
+      conversation_id: conversationId,
+      collection_ids: collectionIds,
+      mode,
+      enable_thinking: enableThinking,
+    }).then(r => r.data),
+  askStream: (
+    question: string,
+    conversationId?: number,
+    collectionIds?: number[],
+    mode: ChatMode = 'rag',
+    enableThinking?: boolean,
+  ) => {
     const token = localStorage.getItem('atlas_token')
     return fetch('/api/chat/stream', {
       method: 'POST',
@@ -223,7 +241,13 @@ export const chatApi = {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ question, conversation_id: conversationId, collection_ids: collectionIds, mode }),
+      body: JSON.stringify({
+        question,
+        conversation_id: conversationId,
+        collection_ids: collectionIds,
+        mode,
+        enable_thinking: enableThinking,
+      }),
     })
   },
   updateSelectedCollections: (collectionIds: number[]) =>
