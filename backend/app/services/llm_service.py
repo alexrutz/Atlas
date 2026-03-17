@@ -46,10 +46,11 @@ class LLMService:
             "top_p": self.config.top_p,
             "max_tokens": self.config.max_tokens,
             "stream": False,
-            "chat_template_kwargs": {"enable_thinking": enable_thinking},
+            "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
         }
+        logger.info(f"generate: enable_thinking={enable_thinking}")
 
-        async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+        async with httpx.AsyncClient(timeout=600.0) as client:
             response = await client.post(
                 f"{self.base_url}/v1/chat/completions",
                 json=body,
@@ -86,10 +87,12 @@ class LLMService:
             "top_p": self.config.top_p,
             "max_tokens": self.config.max_tokens,
             "stream": True,
-            "chat_template_kwargs": {"enable_thinking": enable_thinking},
+            "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
         }
+        logger.info(f"generate_stream: enable_thinking={enable_thinking}")
 
-        async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+        timeout = httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/v1/chat/completions",

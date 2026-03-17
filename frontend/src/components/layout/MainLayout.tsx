@@ -16,6 +16,7 @@ export default function MainLayout() {
 
   const navItems = [
     { to: '/chat', label: 'Chat' },
+    { to: '/context', label: 'Kontext' },
     { to: '/documents', label: 'Dokumente' },
     ...(user?.is_admin ? [{ to: '/admin', label: 'Admin' }] : []),
   ]
