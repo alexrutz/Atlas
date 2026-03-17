@@ -90,9 +90,9 @@ class ChunkingConfig(BaseModel):
 class QueryEnrichmentConfig(BaseModel):
     enabled: bool = True
     prompt_template: str = (
-        "KONTEXT:\n{context}\n\n"
-        "URSPRÜNGLICHE ANFRAGE: {query}\n\n"
-        "ERWEITERTE SUCHANFRAGE:"
+        "CONTEXT:\n{context}\n\n"
+        "ORIGINAL QUERY: {query}\n\n"
+        "ENRICHED QUERY:"
     )
 
 

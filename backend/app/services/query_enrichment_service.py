@@ -1,8 +1,9 @@
 """
 Query Enrichment Service - Reichert Suchanfragen mit Kontextwissen an.
 
-Jede Query geht durch die Enrichment-Pipeline. Das LLM entscheidet selbst,
-ob die Query angereichert wird oder unverändert zurückgegeben wird.
+Jede Query geht durch die Enrichment-Pipeline. Das Ergebnis ist immer ein Paar
+aus (original_query, enriched_query). Wenn kein Kontext vorhanden ist, sind beide
+identisch, aber der Workflow bleibt derselbe.
 """
 
 import logging
@@ -33,16 +34,17 @@ class QueryEnrichmentService:
     ) -> str:
         """
         Reichert eine Suchanfrage mit Kontextinformationen an.
-        Jede Query geht durch die Pipeline - das LLM entscheidet ob angereichert wird.
+
+        Jede Query geht durch die Pipeline. Wenn kein Kontext vorhanden ist,
+        wird die Original-Query unverändert zurückgegeben - der Workflow
+        bleibt aber identisch (enriched_query == original_query).
         """
-        # Kontext-Informationen laden
         context = await self._load_context(collection_ids)
 
         if not context:
-            logger.debug("Kein Kontext für Query-Anreicherung verfügbar")
+            logger.info("Kein Kontext verfügbar - enriched_query = original_query")
             return query
 
-        # LLM-Prompt bauen und angereicherte Query generieren
         enriched = await self._generate_enriched_query(query, context)
         return enriched
 
@@ -56,7 +58,7 @@ class QueryEnrichmentService:
         )
         global_context = result.scalar_one_or_none()
         if global_context:
-            parts.append("Allgemeiner Kontext:\n" + global_context)
+            parts.append("Global context:\n" + global_context)
 
         # 2. Pro-Collection Kontext-Texte laden
         result = await self.db.execute(
@@ -70,7 +72,7 @@ class QueryEnrichmentService:
             if col.context_text:
                 col_context_lines.append(f"- {col.name}: {col.context_text}")
         if col_context_lines:
-            parts.append("Collection-Kontext:\n" + "\n".join(col_context_lines))
+            parts.append("Collection context:\n" + "\n".join(col_context_lines))
 
         return "\n\n".join(parts)
 

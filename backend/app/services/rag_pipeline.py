@@ -91,7 +91,7 @@ class RAGPipeline:
             {"content": r.content, "document_name": r.document_name, "page_number": r.page_number}
             for r in results
         ]
-        prompt = self.llm.build_rag_prompt(question, contexts)
+        prompt = self.llm.build_rag_prompt(question, enriched_query, contexts)
 
         # 5. Antwort generieren
         result = await self.llm.generate(prompt, enable_thinking=enable_thinking)
