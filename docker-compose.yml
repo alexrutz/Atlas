@@ -48,7 +48,6 @@ services:
       --ctx-size 65536
       --n-predict 65536
       --n-gpu-layers 99
-      --chat-template chatml
       --jinja
     deploy:
       resources:
