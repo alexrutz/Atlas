@@ -3,6 +3,7 @@ import { useAuthStore } from './stores/authStore'
 import MainLayout from './components/layout/MainLayout'
 import LoginPage from './pages/LoginPage'
 import ChatPage from './pages/ChatPage'
+import ContextPage from './pages/ContextPage'
 import DocumentsPage from './pages/DocumentsPage'
 import AdminPage from './pages/AdminPage'
 
@@ -20,6 +21,7 @@ export default function App() {
       <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="chat" element={<ChatPage />} />
+        <Route path="context" element={<ContextPage />} />
         <Route path="documents" element={<DocumentsPage />} />
         <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
       </Route>
