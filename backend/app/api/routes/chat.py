@@ -87,7 +87,6 @@ async def get_conversation_messages(
     db: AsyncSession = Depends(get_db),
 ):
     """Nachrichten einer Konversation laden."""
-    # Prüfen ob Konversation dem Benutzer gehört
     result = await db.execute(
         select(Conversation).where(
             Conversation.id == conversation_id,
@@ -98,7 +97,6 @@ async def get_conversation_messages(
     if not conv:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konversation nicht gefunden")
 
-    # Nachrichten laden
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
@@ -110,7 +108,6 @@ async def get_conversation_messages(
     for msg in messages:
         sources = []
         if msg.source_chunks:
-            # Chunk-Infos für Quellenangaben laden
             from app.models.chunk import Chunk
             from app.models.document import Document
             from app.models.collection import Collection
@@ -141,6 +138,7 @@ async def get_conversation_messages(
             sources=sources,
             enriched_query=msg.metadata_.get("enriched_query") if msg.metadata_ else None,
             rag_chunks=msg.metadata_.get("rag_chunks", []) if msg.metadata_ else [],
+            thinking=msg.metadata_.get("thinking") if msg.metadata_ else None,
             created_at=msg.created_at,
         ))
     return response
@@ -160,6 +158,8 @@ async def ask_question(
             user=current_user,
             conversation_id=request.conversation_id,
             collection_ids=request.collection_ids,
+            enable_thinking=request.enable_thinking,
+            rag_mode=request.rag_mode,
         )
         return result
     except Exception as e:
@@ -180,7 +180,53 @@ async def ask_question_stream(
     pipeline = RAGPipeline(db)
 
     try:
-        # Retrieval durchführen (nicht-streaming Teil)
+        # Free chat mode - no retrieval needed
+        if not request.rag_mode:
+            system = pipeline.llm.config.free_chat_system_prompt or pipeline.llm.config.system_prompt
+
+            async def free_chat_stream():
+                full_answer = ""
+                full_thinking = ""
+                try:
+                    async for chunk in pipeline.llm.generate_stream(
+                        request.question,
+                        system_prompt=system,
+                        enable_thinking=request.enable_thinking,
+                    ):
+                        if chunk["type"] == "thinking":
+                            full_thinking += chunk["text"]
+                            data = json.dumps({"type": "thinking", "content": chunk["text"]})
+                            yield f"data: {data}\n\n"
+                        elif chunk["type"] == "content":
+                            full_answer += chunk["text"]
+                            data = json.dumps({"type": "token", "content": chunk["text"]})
+                            yield f"data: {data}\n\n"
+
+                    conv_id = await pipeline._save_to_conversation(
+                        user=current_user,
+                        conversation_id=request.conversation_id,
+                        question=request.question,
+                        answer=full_answer,
+                        results=[],
+                        search_ids=[],
+                        thinking=full_thinking or None,
+                    )
+                    await db.commit()
+
+                    done_data = json.dumps({"type": "done", "conversation_id": conv_id})
+                    yield f"data: {done_data}\n\n"
+                except Exception as e:
+                    logger.error(f"Free-Chat Streaming-Fehler: {e}", exc_info=True)
+                    error_data = json.dumps({"type": "error", "content": str(e)})
+                    yield f"data: {error_data}\n\n"
+
+            return StreamingResponse(
+                free_chat_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+            )
+
+        # RAG mode
         allowed_ids = await pipeline._get_allowed_collection_ids(current_user)
         if not allowed_ids:
             async def no_access():
@@ -199,52 +245,42 @@ async def ask_question_stream(
                 yield f"data: {data}\n\n"
             return StreamingResponse(no_collections(), media_type="text/event-stream")
 
-        # Query-Anreicherung: Suchanfrage mit Glossar/Kontext erweitern
+        # Query enrichment
         enriched_query = await pipeline.query_enrichment.enrich_query(
             query=request.question, collection_ids=search_ids,
         )
 
         results = await pipeline.retrieval.search(query=enriched_query, collection_ids=search_ids)
 
-        # Fallback: Bei leeren Ergebnissen mit Original-Query erneut suchen
         if not results and enriched_query != request.question:
-            logger.info("Angereicherte Query lieferte keine Ergebnisse, Fallback auf Original-Query")
             results = await pipeline.retrieval.search(query=request.question, collection_ids=search_ids)
 
         if not results:
-            logger.warning(f"Keine Ergebnisse für Query '{request.question}' in Collections {search_ids}")
             async def no_results():
                 data = json.dumps({"type": "error", "content": "Keine relevanten Informationen gefunden."})
                 yield f"data: {data}\n\n"
             return StreamingResponse(no_results(), media_type="text/event-stream")
 
-        # Quellen aufbauen
         sources = [
             SourceChunk(
-                chunk_id=r.chunk_id,
-                document_name=r.document_name,
+                chunk_id=r.chunk_id, document_name=r.document_name,
                 collection_name=r.collection_name,
                 content_preview=r.content[:200] + "..." if len(r.content) > 200 else r.content,
-                page_number=r.page_number,
-                similarity_score=r.similarity_score,
+                page_number=r.page_number, similarity_score=r.similarity_score,
             )
             for r in results
         ]
 
-        # Prompt bauen
         contexts = [
             {"content": r.content, "document_name": r.document_name, "page_number": r.page_number}
             for r in results
         ]
         prompt = pipeline.llm.build_rag_prompt(request.question, contexts)
 
-        # Vollständige Chunk-Kontexte für Debug-Anzeige aufbauen
         rag_chunks = [
             {
-                "document_name": r.document_name,
-                "collection_name": r.collection_name,
-                "page_number": r.page_number,
-                "content": r.content,
+                "document_name": r.document_name, "collection_name": r.collection_name,
+                "page_number": r.page_number, "content": r.content,
                 "similarity_score": r.similarity_score,
             }
             for r in results
@@ -252,8 +288,9 @@ async def ask_question_stream(
 
         async def event_stream():
             full_answer = ""
+            full_thinking = ""
             try:
-                # Enriched Query + RAG-Kontext senden (für Debug-Panel)
+                # Debug info
                 debug_data = json.dumps({
                     "type": "debug_info",
                     "enriched_query": enriched_query,
@@ -261,20 +298,28 @@ async def ask_question_stream(
                 })
                 yield f"data: {debug_data}\n\n"
 
-                # Quellen zuerst senden
+                # Sources
                 sources_data = json.dumps({
                     "type": "sources",
                     "sources": [s.model_dump() for s in sources],
                 })
                 yield f"data: {sources_data}\n\n"
 
-                # Streaming-Antwort
-                async for token in pipeline.llm.generate_stream(prompt):
-                    full_answer += token
-                    data = json.dumps({"type": "token", "content": token})
-                    yield f"data: {data}\n\n"
+                # Streaming answer with thinking
+                async for chunk in pipeline.llm.generate_stream(
+                    prompt,
+                    enable_thinking=request.enable_thinking,
+                ):
+                    if chunk["type"] == "thinking":
+                        full_thinking += chunk["text"]
+                        data = json.dumps({"type": "thinking", "content": chunk["text"]})
+                        yield f"data: {data}\n\n"
+                    elif chunk["type"] == "content":
+                        full_answer += chunk["text"]
+                        data = json.dumps({"type": "token", "content": chunk["text"]})
+                        yield f"data: {data}\n\n"
 
-                # Konversation speichern
+                # Save conversation
                 conv_id = await pipeline._save_to_conversation(
                     user=current_user,
                     conversation_id=request.conversation_id,
@@ -284,6 +329,7 @@ async def ask_question_stream(
                     search_ids=search_ids,
                     enriched_query=enriched_query,
                     rag_chunks=rag_chunks,
+                    thinking=full_thinking or None,
                 )
                 await db.commit()
 
@@ -297,11 +343,7 @@ async def ask_question_stream(
         return StreamingResponse(
             event_stream(),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
 
     except Exception as e:
@@ -319,13 +361,11 @@ async def update_selected_collections(
     db: AsyncSession = Depends(get_db),
 ):
     """Aktive Collections für den aktuellen Benutzer setzen."""
-    # Alte Auswahl löschen
     existing = await db.execute(
         select(UserSelectedCollection).where(UserSelectedCollection.user_id == current_user.id)
     )
     for sel in existing.scalars().all():
         await db.delete(sel)
 
-    # Neue Auswahl setzen
     for cid in data.collection_ids:
         db.add(UserSelectedCollection(user_id=current_user.id, collection_id=cid))

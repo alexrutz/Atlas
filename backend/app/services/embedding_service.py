@@ -1,14 +1,12 @@
 """
-Embedding Service - Berechnet Embedding-Vektoren über Ollama.
+Embedding Service - Berechnet Embedding-Vektoren über llama.cpp.
 
-Verwendet den in config.yaml konfigurierten Embedding-Provider und das Modell.
-Unterstützt Batch-Verarbeitung für effizientes Embedding vieler Chunks.
+Verwendet die OpenAI-kompatible /v1/embeddings API von llama.cpp.
 """
 
 import logging
 
 import httpx
-import numpy as np
 
 from app.core.config import settings
 
@@ -16,73 +14,66 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
-    """Berechnet Embedding-Vektoren für Texte."""
+    """Berechnet Embedding-Vektoren für Texte über llama.cpp."""
 
     def __init__(self):
         self.config = settings.embedding
         self.base_url = self.config.base_url
 
     async def embed_text(self, text: str) -> list[float]:
-        """
-        Berechnet den Embedding-Vektor für einen einzelnen Text.
-
-        Args:
-            text: Der zu embeddende Text (idealerweise bereits kontextangereichert)
-
-        Returns:
-            Liste von Floats (Embedding-Vektor)
-        """
+        """Berechnet den Embedding-Vektor für einen einzelnen Text."""
         async with httpx.AsyncClient(timeout=self.config.timeout) as client:
             for attempt in range(self.config.max_retries):
                 try:
                     response = await client.post(
-                        f"{self.base_url}/api/embed",
-                        json={"model": self.config.model, "input": text},
+                        f"{self.base_url}/v1/embeddings",
+                        json={
+                            "input": text,
+                            "model": self.config.model,
+                        },
                     )
                     response.raise_for_status()
                     data = response.json()
-                    return data["embeddings"][0]
+                    return data["data"][0]["embedding"]
                 except Exception as e:
                     logger.warning(f"Embedding-Versuch {attempt + 1} fehlgeschlagen: {e}")
                     if attempt == self.config.max_retries - 1:
                         raise
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """
-        Berechnet Embedding-Vektoren für mehrere Texte in Batches.
-
-        Args:
-            texts: Liste der zu embeddenden Texte
-
-        Returns:
-            Liste von Embedding-Vektoren
-        """
+        """Berechnet Embedding-Vektoren für mehrere Texte in Batches."""
         embeddings = []
         batch_size = self.config.batch_size
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
             logger.info(f"Embedding Batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size}")
-            batch_embeddings = []
-            for text in batch:
-                emb = await self.embed_text(text)
-                batch_embeddings.append(emb)
-            embeddings.extend(batch_embeddings)
+
+            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+                for attempt in range(self.config.max_retries):
+                    try:
+                        response = await client.post(
+                            f"{self.base_url}/v1/embeddings",
+                            json={
+                                "input": batch,
+                                "model": self.config.model,
+                            },
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        batch_embeddings = [item["embedding"] for item in data["data"]]
+                        embeddings.extend(batch_embeddings)
+                        break
+                    except Exception as e:
+                        logger.warning(f"Batch-Embedding Versuch {attempt + 1} fehlgeschlagen: {e}")
+                        if attempt == self.config.max_retries - 1:
+                            # Fallback: einzeln embedden
+                            for text in batch:
+                                emb = await self.embed_text(text)
+                                embeddings.append(emb)
 
         return embeddings
 
     async def embed_query(self, query: str) -> list[float]:
-        """
-        Berechnet den Embedding-Vektor für eine Suchanfrage.
-        Kann ggf. andere Prefix-Strategien verwenden als für Dokumente.
-
-        Args:
-            query: Die Suchanfrage des Benutzers
-
-        Returns:
-            Embedding-Vektor
-        """
-        # Manche Embedding-Modelle verwenden Prefixes für Query vs. Document
-        # z.B. nomic-embed-text verwendet "search_query:" und "search_document:"
-        prefixed_query = f"search_query: {query}"
-        return await self.embed_text(prefixed_query)
+        """Berechnet den Embedding-Vektor für eine Suchanfrage."""
+        return await self.embed_text(query)

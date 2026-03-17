@@ -2,7 +2,6 @@
 # =============================================================================
 # Atlas RAG System - Erstinstallation
 # =============================================================================
-# Dieses Skript richtet das System für den ersten Start ein.
 # Verwendung: chmod +x scripts/setup.sh && ./scripts/setup.sh
 # =============================================================================
 
@@ -14,7 +13,7 @@ echo "================================================"
 
 # 1. Prüfe Voraussetzungen
 echo ""
-echo "[1/6] Prüfe Voraussetzungen..."
+echo "[1/5] Prüfe Voraussetzungen..."
 
 command -v docker >/dev/null 2>&1 || { echo "FEHLER: Docker ist nicht installiert."; exit 1; }
 command -v docker compose >/dev/null 2>&1 || { echo "FEHLER: Docker Compose ist nicht installiert."; exit 1; }
@@ -23,11 +22,10 @@ echo "  Docker Compose: OK"
 
 # 2. .env Datei erstellen
 echo ""
-echo "[2/6] Erstelle .env Datei..."
+echo "[2/5] Erstelle .env Datei..."
 
 if [ ! -f .env ]; then
     cp .env.example .env
-    # Generiere sicheren Secret Key
     SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(32))")
     sed -i "s/bitte_mit_openssl_rand_hex_32_generieren/$SECRET_KEY/" .env
     echo "  .env erstellt. BITTE DB_PASSWORD und ADMIN_DEFAULT_PASSWORD anpassen!"
@@ -35,29 +33,34 @@ else
     echo "  .env existiert bereits."
 fi
 
-# 3. Verzeichnisse erstellen
+# 3. Verzeichnisse und Modelle prüfen
 echo ""
-echo "[3/6] Erstelle Verzeichnisse..."
+echo "[3/5] Prüfe Verzeichnisse und Modelle..."
 mkdir -p logs
-echo "  logs/ erstellt"
+mkdir -p ../models
+mkdir -p ../postgres_data
+
+if [ ! -f ../models/Qwen3.5-35B-A3B-UD-IQ3_S.gguf ]; then
+    echo "  WARNUNG: LLM-Modell nicht gefunden in ../models/"
+    echo "  Bitte Qwen3.5-35B-A3B-UD-IQ3_S.gguf herunterladen"
+fi
+
+if [ ! -f ../models/pplx-embed-context-v1-0.6b-q8_0.gguf ]; then
+    echo "  WARNUNG: Embedding-Modell nicht gefunden in ../models/"
+    echo "  Bitte pplx-embed-context-v1-0.6b-q8_0.gguf herunterladen"
+fi
 
 # 4. Docker-Container starten
 echo ""
-echo "[4/6] Starte Docker-Container..."
-docker compose up -d postgres ollama
-echo "  PostgreSQL und Ollama gestartet. Warte auf Bereitschaft..."
-sleep 10
+echo "[4/5] Starte Datenbank und LLM-Server..."
+docker compose up -d postgres llama-cpp llama-cpp-embed
+echo "  Warte auf Bereitschaft..."
+sleep 15
 
-# 5. Ollama-Modelle herunterladen
+# 5. Backend und Frontend starten
 echo ""
-echo "[5/6] Lade LLM- und Embedding-Modelle herunter..."
-echo "  Dies kann beim ersten Mal 30-60 Minuten dauern!"
-bash scripts/pull-models.sh
-
-# 6. Backend und Frontend starten
-echo ""
-echo "[6/6] Starte Backend und Frontend..."
-docker compose up -d
+echo "[5/5] Starte Backend und Frontend..."
+docker compose up -d --build
 echo ""
 echo "================================================"
 echo " Atlas ist bereit!"

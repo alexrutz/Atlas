@@ -26,7 +26,3 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
-
-# Docker Volumes (lokal)
-postgres_data/
-ollama_data/

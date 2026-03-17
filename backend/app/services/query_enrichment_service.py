@@ -1,19 +1,19 @@
 """
 Query Enrichment Service - Reichert Suchanfragen mit Kontextwissen an.
 
-Bevor eine Suchanfrage an die Retrieval-Pipeline geht, wird sie mit dem
-allgemeinen Kontext und den Collection-spezifischen Kontext-Texten angereichert.
+Jede Query geht durch die Enrichment-Pipeline. Das LLM entscheidet selbst,
+ob die Query angereichert wird oder unverändert zurückgegeben wird.
 """
 
 import logging
 
-import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.models.collection import Collection
 from app.models.system_setting import SystemSetting
+from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class QueryEnrichmentService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.config = settings.retrieval.query_enrichment
-        self.llm_config = settings.llm
+        self.llm = LLMService()
 
     async def enrich_query(
         self,
@@ -33,20 +33,8 @@ class QueryEnrichmentService:
     ) -> str:
         """
         Reichert eine Suchanfrage mit Kontextinformationen an.
-
-        Lädt den allgemeinen Kontext und die Collection-spezifischen Kontext-Texte
-        und lässt das LLM die Anfrage um passende Fachbegriffe erweitern.
-
-        Args:
-            query: Die ursprüngliche Suchanfrage des Benutzers
-            collection_ids: IDs der zu durchsuchenden Collections
-
-        Returns:
-            Die angereicherte Suchanfrage
+        Jede Query geht durch die Pipeline - das LLM entscheidet ob angereichert wird.
         """
-        if not self.config.enabled:
-            return query
-
         # Kontext-Informationen laden
         context = await self._load_context(collection_ids)
 
@@ -59,12 +47,7 @@ class QueryEnrichmentService:
         return enriched
 
     async def _load_context(self, collection_ids: list[int]) -> str:
-        """
-        Lädt den globalen Kontext und die pro-Collection Kontext-Texte.
-
-        Returns:
-            Zusammengesetzter Kontext-String für das LLM
-        """
+        """Lädt den globalen Kontext und die pro-Collection Kontext-Texte."""
         parts = []
 
         # 1. Globalen Kontext laden
@@ -92,37 +75,14 @@ class QueryEnrichmentService:
         return "\n\n".join(parts)
 
     async def _generate_enriched_query(self, query: str, context: str) -> str:
-        """
-        Lässt das LLM die Suchanfrage mit dem geladenen Kontext anreichern.
-
-        Args:
-            query: Die ursprüngliche Anfrage
-            context: Kontext-Informationen
-
-        Returns:
-            Die angereicherte Anfrage
-        """
+        """Lässt das LLM die Suchanfrage mit dem geladenen Kontext anreichern."""
         prompt = self.config.prompt_template.format(
             context=context,
             query=query,
         )
 
         try:
-            async with httpx.AsyncClient(timeout=self.llm_config.timeout) as client:
-                response = await client.post(
-                    f"{self.llm_config.base_url}/api/generate",
-                    json={
-                        "model": self.llm_config.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.0,
-                            "num_predict": 256,
-                        },
-                    },
-                )
-                response.raise_for_status()
-                enriched_query = response.json()["response"].strip()
+            enriched_query = await self.llm.generate_enrichment(prompt)
 
             if enriched_query:
                 logger.info(

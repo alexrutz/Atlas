@@ -1,29 +1,14 @@
 /**
  * ChatPage - Hauptseite mit Chatfenster, Collection-Auswahl und Konversationsverlauf.
- *
- * Layout:
- * ┌──────────────────────────────────────────────────────┐
- * │ Konversationen │ Collections   │  Chat-Fenster       │
- * │                │               │                     │
- * │ > Konv 1       │ [x] Normen    │  Frage...           │
- * │   Konv 2       │ [x] Daten     │  Antwort (Markdown) │
- * │   Konv 3       │ [ ] Anfragen  │  [Debug aufklappbar]│
- * │                │               │                     │
- * │ [+ Neuer Chat] │               │ ┌─────────────────┐ │
- * │                │               │ │ Eingabefeld     │ │
- * │                │               │ └─────────────────┘ │
- * └──────────────────────────────────────────────────────┘
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useChatStore } from '../stores/chatStore'
-import { settingsApi } from '../services/api'
 import type { SourceChunk, RagChunk } from '../types'
-import type { OllamaModel, ModelConfig } from '../services/api'
 
 // =============================================================================
-// SourcesPanel - Quellen anzeigen
+// SourcesPanel
 // =============================================================================
 
 function SourcesPanel({ sources }: { sources: SourceChunk[] }) {
@@ -75,31 +60,37 @@ function SourcesPanel({ sources }: { sources: SourceChunk[] }) {
 }
 
 // =============================================================================
-// DebugPanel - Query + RAG-Chunks unterhalb einer Nachricht
+// DebugPanel - Query + RAG-Chunks + Thinking unterhalb einer Nachricht
 // =============================================================================
 
 function DebugPanel({
   enrichedQuery,
   originalQuery,
   ragChunks,
+  thinking,
 }: {
   enrichedQuery?: string | null
   originalQuery?: string
   ragChunks?: RagChunk[]
+  thinking?: string | null
 }) {
   const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'query' | 'chunks'>('query')
+  const [activeTab, setActiveTab] = useState<'query' | 'chunks' | 'thinking'>('query')
 
   const hasQuery = !!enrichedQuery || !!originalQuery
   const hasChunks = ragChunks && ragChunks.length > 0
-  if (!hasQuery && !hasChunks) return null
+  const hasThinking = !!thinking
+  if (!hasQuery && !hasChunks && !hasThinking) return null
+
+  // Auto-select first available tab
+  const firstTab = hasThinking ? 'thinking' : hasQuery ? 'query' : 'chunks'
 
   return (
     <div className="mt-1">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => { setOpen(!open); if (!open) setActiveTab(firstTab) }}
         className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 transition"
-        title="RAG-Debug anzeigen"
+        title="Debug anzeigen"
       >
         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
@@ -110,6 +101,18 @@ function DebugPanel({
         <div className="mt-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs overflow-hidden">
           {/* Tabs */}
           <div className="flex border-b border-gray-200 bg-gray-100">
+            {hasThinking && (
+              <button
+                onClick={() => setActiveTab('thinking')}
+                className={`px-3 py-1.5 text-xs font-medium transition ${
+                  activeTab === 'thinking'
+                    ? 'text-purple-700 border-b-2 border-purple-500 bg-white'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Thinking
+              </button>
+            )}
             {hasQuery && (
               <button
                 onClick={() => setActiveTab('query')}
@@ -138,6 +141,11 @@ function DebugPanel({
 
           {/* Tab Content */}
           <div className="p-3 max-h-80 overflow-y-auto">
+            {activeTab === 'thinking' && hasThinking && (
+              <div className="bg-purple-50 border border-purple-200 rounded p-3">
+                <p className="whitespace-pre-wrap text-gray-700 text-[11px] leading-relaxed">{thinking}</p>
+              </div>
+            )}
             {activeTab === 'query' && hasQuery && (
               <div className="space-y-2">
                 {originalQuery && (
@@ -188,55 +196,21 @@ function DebugPanel({
 export default function ChatPage() {
   const {
     conversations, currentConversationId, messages, collections,
-    selectedCollectionIds, isLoading, streamingContent, globalContext,
+    selectedCollectionIds, isLoading, streamingContent, streamingThinking,
+    enableThinking, ragMode,
     loadConversations, selectConversation,
     deleteConversation, loadCollections, toggleCollection,
-    sendMessageStream, clearChat, loadGlobalContext,
-    updateGlobalContext,
+    sendMessageStream, clearChat,
+    setEnableThinking, setRagMode,
   } = useChatStore()
 
   const [input, setInput] = useState('')
-  const [showGlobalContext, setShowGlobalContext] = useState(false)
-  const [globalContextDraft, setGlobalContextDraft] = useState('')
-  const [showModelConfig, setShowModelConfig] = useState(false)
-  const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null)
-  const [availableModels, setAvailableModels] = useState<OllamaModel[]>([])
-  const [modelSaving, setModelSaving] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadCollections()
     loadConversations()
-    loadGlobalContext()
-    settingsApi.getModelConfig().then(setModelConfig).catch(() => {})
-  }, [loadCollections, loadConversations, loadGlobalContext])
-
-  const handleToggleModelConfig = useCallback(() => {
-    if (!showModelConfig && availableModels.length === 0) {
-      settingsApi.getAvailableModels()
-        .then((data) => setAvailableModels(data.models))
-        .catch(() => {})
-    }
-    setShowModelConfig(!showModelConfig)
-  }, [showModelConfig, availableModels.length])
-
-  const handleModelChange = useCallback(async (field: 'llm_model' | 'embedding_model', value: string) => {
-    if (!modelConfig) return
-    setModelSaving(true)
-    try {
-      const updated = await settingsApi.updateModelConfig({ [field]: value })
-      setModelConfig(updated)
-    } catch {
-      // Ignore - user may not have admin rights
-    } finally {
-      setModelSaving(false)
-    }
-  }, [modelConfig])
-
-  const handleSaveGlobalContext = useCallback(() => {
-    updateGlobalContext(globalContextDraft)
-    setShowGlobalContext(false)
-  }, [globalContextDraft, updateGlobalContext])
+  }, [loadCollections, loadConversations])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -244,12 +218,12 @@ export default function ChatPage() {
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
+    if (ragMode && selectedCollectionIds.length === 0) return
     const question = input
     setInput('')
     await sendMessageStream(question)
   }
 
-  // Für das Debug-Panel: Original-Query der vorangehenden User-Nachricht finden
   const getOriginalQuery = (msgIndex: number): string | undefined => {
     if (messages[msgIndex]?.role === 'assistant' && msgIndex > 0 && messages[msgIndex - 1]?.role === 'user') {
       return messages[msgIndex - 1].content
@@ -307,91 +281,25 @@ export default function ChatPage() {
 
       {/* Collection-Sidebar */}
       <div className="w-64 border-r bg-white p-4 overflow-y-auto flex flex-col">
-        {/* Globaler Kontext */}
+        {/* RAG / Free Chat Toggle */}
         <div className="mb-3 pb-3 border-b border-gray-200">
-          <button
-            onClick={() => { setShowGlobalContext(!showGlobalContext); setGlobalContextDraft(globalContext) }}
-            className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-atlas-600 uppercase w-full"
-          >
-            <span className={`inline-block transition-transform text-[10px] ${showGlobalContext ? 'rotate-90' : ''}`}>&#9654;</span>
-            Allgemeiner Kontext
-            {globalContext && <span className="ml-auto w-2 h-2 rounded-full bg-atlas-500 shrink-0" title="Kontext gesetzt" />}
-          </button>
-          {showGlobalContext && (
-            <div className="mt-2">
-              <textarea
-                value={globalContextDraft}
-                onChange={(e) => setGlobalContextDraft(e.target.value)}
-                placeholder="Allgemeiner Kontext für alle Collections, z.B. Erklärungen zu Variablen und Abkürzungen..."
-                className="w-full text-xs p-2 border rounded resize-none focus:ring-1 focus:ring-atlas-500 outline-none"
-                rows={4}
-              />
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-gray-500 uppercase">Modus</span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className={`text-[10px] ${ragMode ? 'text-atlas-600 font-medium' : 'text-gray-400'}`}>RAG</span>
               <button
-                onClick={handleSaveGlobalContext}
-                className="mt-1 text-[10px] px-2 py-0.5 bg-atlas-600 text-white rounded hover:bg-atlas-700"
+                onClick={() => setRagMode(!ragMode)}
+                className={`relative w-8 h-4 rounded-full transition ${ragMode ? 'bg-atlas-500' : 'bg-gray-300'}`}
               >
-                Speichern
+                <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${
+                  ragMode ? 'left-0.5' : 'left-4.5 translate-x-0'
+                }`} style={{ left: ragMode ? '2px' : '18px' }} />
               </button>
+              <span className={`text-[10px] ${!ragMode ? 'text-purple-600 font-medium' : 'text-gray-400'}`}>Frei</span>
             </div>
-          )}
-        </div>
-
-        {/* Modell-Konfiguration */}
-        <div className="mb-3 pb-3 border-b border-gray-200">
-          <button
-            onClick={handleToggleModelConfig}
-            className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-atlas-600 uppercase w-full"
-          >
-            <span className={`inline-block transition-transform text-[10px] ${showModelConfig ? 'rotate-90' : ''}`}>&#9654;</span>
-            Modelle
-            {modelConfig && (
-              <span className="ml-auto text-[10px] normal-case font-normal text-gray-400 truncate max-w-[120px]">
-                {modelConfig.llm_model}
-              </span>
-            )}
-          </button>
-          {showModelConfig && modelConfig && (
-            <div className="mt-2 space-y-2">
-              <div>
-                <label className="text-[10px] font-medium text-gray-500 block mb-0.5">Sprachmodell (LLM)</label>
-                <select
-                  value={modelConfig.llm_model}
-                  onChange={(e) => handleModelChange('llm_model', e.target.value)}
-                  disabled={modelSaving}
-                  className="w-full text-xs p-1.5 border rounded focus:ring-1 focus:ring-atlas-500 outline-none bg-white"
-                >
-                  {!availableModels.some(m => m.name === modelConfig.llm_model) && (
-                    <option value={modelConfig.llm_model}>{modelConfig.llm_model}</option>
-                  )}
-                  {availableModels.map((m) => (
-                    <option key={m.name} value={m.name}>
-                      {m.name} {m.parameter_size ? `(${m.parameter_size})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-[10px] font-medium text-gray-500 block mb-0.5">Embedding-Modell</label>
-                <select
-                  value={modelConfig.embedding_model}
-                  onChange={(e) => handleModelChange('embedding_model', e.target.value)}
-                  disabled={modelSaving}
-                  className="w-full text-xs p-1.5 border rounded focus:ring-1 focus:ring-atlas-500 outline-none bg-white"
-                >
-                  {!availableModels.some(m => m.name === modelConfig.embedding_model) && (
-                    <option value={modelConfig.embedding_model}>{modelConfig.embedding_model}</option>
-                  )}
-                  {availableModels.map((m) => (
-                    <option key={m.name} value={m.name}>
-                      {m.name} {m.parameter_size ? `(${m.parameter_size})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {modelSaving && (
-                <p className="text-[10px] text-atlas-600">Speichern...</p>
-              )}
-            </div>
+          </div>
+          {!ragMode && (
+            <p className="text-[10px] text-gray-400 mt-1">Direkte Konversation ohne Dokumentenkontext</p>
           )}
         </div>
 
@@ -401,12 +309,13 @@ export default function ChatPage() {
           <p className="text-xs text-gray-400">Keine Collections verfügbar</p>
         )}
         {collections.map((col) => (
-          <div key={col.id} className="p-2 hover:bg-gray-50 rounded">
+          <div key={col.id} className={`p-2 hover:bg-gray-50 rounded ${!ragMode ? 'opacity-50' : ''}`}>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={selectedCollectionIds.includes(col.id)}
                 onChange={() => toggleCollection(col.id)}
+                disabled={!ragMode}
                 className="rounded border-gray-300 text-atlas-600 focus:ring-atlas-500"
               />
               <span className="text-sm truncate">{col.name}</span>
@@ -424,8 +333,12 @@ export default function ChatPage() {
             <div className="text-center text-gray-400 mt-20">
               <div className="text-5xl mb-4">&#128218;</div>
               <h2 className="text-xl font-medium">Willkommen bei Atlas</h2>
-              <p className="mt-2">Stellen Sie eine Frage zu Ihren Dokumenten.</p>
-              {selectedCollectionIds.length === 0 && (
+              <p className="mt-2">
+                {ragMode
+                  ? 'Stellen Sie eine Frage zu Ihren Dokumenten.'
+                  : 'Freier Chat-Modus - sprechen Sie direkt mit dem Modell.'}
+              </p>
+              {ragMode && selectedCollectionIds.length === 0 && (
                 <p className="mt-4 text-sm text-amber-500">
                   Bitte wählen Sie mindestens eine Collection aus.
                 </p>
@@ -448,31 +361,38 @@ export default function ChatPage() {
                 )}
                 <SourcesPanel sources={msg.sources} />
               </div>
-              {/* Debug-Panel unter jeder Assistenten-Nachricht */}
               {msg.role === 'assistant' && (
                 <div className="max-w-3xl w-full">
                   <DebugPanel
                     enrichedQuery={msg.enriched_query}
                     originalQuery={getOriginalQuery(idx)}
                     ragChunks={msg.rag_chunks}
+                    thinking={msg.thinking}
                   />
                 </div>
               )}
             </div>
           ))}
           {/* Streaming-Anzeige */}
-          {isLoading && streamingContent && (
-            <div className="flex justify-start">
-              <div className="max-w-3xl bg-white border rounded-lg p-4 shadow-sm">
-                <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-li:my-0">
-                  <ReactMarkdown>{streamingContent}</ReactMarkdown>
+          {isLoading && (streamingContent || streamingThinking) && (
+            <div className="flex flex-col items-start gap-1">
+              {streamingThinking && (
+                <div className="max-w-3xl bg-purple-50 border border-purple-200 rounded-lg p-3 text-xs">
+                  <span className="text-purple-600 font-medium text-[10px] block mb-1">Thinking...</span>
+                  <p className="whitespace-pre-wrap text-gray-600">{streamingThinking}</p>
                 </div>
-                <span className="inline-block w-2 h-4 bg-atlas-500 animate-pulse ml-0.5" />
-              </div>
+              )}
+              {streamingContent && (
+                <div className="max-w-3xl bg-white border rounded-lg p-4 shadow-sm">
+                  <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-li:my-0">
+                    <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                  </div>
+                  <span className="inline-block w-2 h-4 bg-atlas-500 animate-pulse ml-0.5" />
+                </div>
+              )}
             </div>
           )}
-          {/* Loading-Animation (kein Streaming-Content) */}
-          {isLoading && !streamingContent && (
+          {isLoading && !streamingContent && !streamingThinking && (
             <div className="flex justify-start">
               <div className="bg-white border rounded-lg p-4 shadow-sm">
                 <div className="flex items-center gap-2">
@@ -481,7 +401,9 @@ export default function ChatPage() {
                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                   </div>
-                  <span className="text-xs text-gray-400">Suche und generiere Antwort...</span>
+                  <span className="text-xs text-gray-400">
+                    {ragMode ? 'Suche und generiere Antwort...' : 'Generiere Antwort...'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -497,17 +419,29 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-              placeholder="Stellen Sie eine Frage..."
+              placeholder={ragMode ? 'Stellen Sie eine Frage...' : 'Nachricht eingeben...'}
               className="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-atlas-500 outline-none"
               disabled={isLoading}
             />
-            <button
-              onClick={handleSend}
-              disabled={isLoading || !input.trim() || selectedCollectionIds.length === 0}
-              className="px-6 py-3 bg-atlas-600 text-white rounded-lg hover:bg-atlas-700 disabled:opacity-50 transition"
-            >
-              Senden
-            </button>
+            <div className="flex flex-col items-center gap-1">
+              <button
+                onClick={handleSend}
+                disabled={isLoading || !input.trim() || (ragMode && selectedCollectionIds.length === 0)}
+                className="px-6 py-3 bg-atlas-600 text-white rounded-lg hover:bg-atlas-700 disabled:opacity-50 transition"
+              >
+                Senden
+              </button>
+              {/* Thinking Toggle */}
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enableThinking}
+                  onChange={(e) => setEnableThinking(e.target.checked)}
+                  className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 w-3 h-3"
+                />
+                <span className="text-[10px] text-gray-500">Thinking</span>
+              </label>
+            </div>
           </div>
         </div>
       </div>

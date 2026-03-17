@@ -1,22 +1,19 @@
 # =============================================================================
 # Atlas RAG System - Zentrale Konfiguration
 # =============================================================================
-# Diese Datei wird bei jedem Start des Systems eingelesen.
-# Alle Modelle, Parameter und Systemeinstellungen werden hier konfiguriert.
-# =============================================================================
 
 # -----------------------------------------------------------------------------
 # Server-Konfiguration
 # -----------------------------------------------------------------------------
 server:
-  host: "0.0.0.0"                    # Auf allen Netzwerk-Interfaces lauschen
-  port: 8000                          # Backend API Port
-  frontend_port: 3000                 # Frontend Port
-  workers: 4                          # Anzahl der Uvicorn Worker
-  cors_origins:                       # Erlaubte Origins für CORS
+  host: "0.0.0.0"
+  port: 8000
+  frontend_port: 3000
+  workers: 4
+  cors_origins:
     - "http://localhost:3000"
-    - "http://${HOSTNAME}:3000"       # Automatisch den Hostnamen verwenden
-  log_level: "info"                   # debug, info, warning, error, critical
+    - "http://${HOSTNAME}:3000"
+  log_level: "info"
 
 # -----------------------------------------------------------------------------
 # Datenbank-Konfiguration (PostgreSQL)
@@ -26,67 +23,71 @@ database:
   port: 5432
   name: "atlas"
   user: "atlas_user"
-  password: "${DB_PASSWORD}"          # Aus Umgebungsvariable laden
-  pool_size: 20                       # Connection Pool Größe
-  max_overflow: 10                    # Maximale zusätzliche Connections
-  echo_sql: false                     # SQL-Queries loggen (nur für Debugging)
+  password: "${DB_PASSWORD}"
+  pool_size: 20
+  max_overflow: 10
+  echo_sql: false
 
 # -----------------------------------------------------------------------------
 # pgvector Konfiguration
 # -----------------------------------------------------------------------------
 vector:
-  dimensions: 768                     # Dimensionen des Embedding-Modells (nomic-embed-text: 768)
-  index_type: "ivfflat"              # ivfflat oder hnsw
-  distance_metric: "cosine"           # cosine, l2, inner_product
-  ivfflat_lists: 100                  # Anzahl der IVFFlat Listen (bei ivfflat)
-  hnsw_m: 16                          # HNSW Parameter M (bei hnsw)
-  hnsw_ef_construction: 64            # HNSW Build-Parameter (bei hnsw)
-  probes: 10                          # Anzahl der zu durchsuchenden Listen
+  dimensions: 768
+  index_type: "ivfflat"
+  distance_metric: "cosine"
+  ivfflat_lists: 100
+  hnsw_m: 16
+  hnsw_ef_construction: 64
+  probes: 10
 
 # -----------------------------------------------------------------------------
-# LLM-Konfiguration (Lokales Modell via Ollama)
+# LLM-Konfiguration (llama.cpp OpenAI-kompatible API)
 # -----------------------------------------------------------------------------
 llm:
-  provider: "ollama"                  # ollama oder vllm
-  base_url: "http://ollama:11434"     # Ollama API URL
-  model: "llama3.1:8b"               # Modellname
-  temperature: 0.1                    # Kreativität (0.0 = deterministisch)
-  top_p: 0.9                         # Nucleus Sampling
-  top_k: 40                          # Top-K Sampling
-  max_tokens: 4096                    # Maximale Antwortlänge
-  context_window: 8192                # Kontextfenster des Modells
-  repeat_penalty: 1.1                 # Wiederholungsstrafe
-  num_gpu: 1                          # Anzahl GPUs
-  num_threads: 8                      # CPU Threads (falls CPU-Inferenz)
-  timeout: 120                        # Timeout in Sekunden
+  base_url: "http://llama-cpp:8080"
+  model: "Qwen3.5-35B-A3B-UD-IQ3_S.gguf"
+  temperature: 0.1
+  top_p: 0.9
+  top_k: 40
+  max_tokens: 4096
+  context_window: 8192
+  repeat_penalty: 1.1
+  timeout: 120
   system_prompt: |
     Du bist Atlas, ein KI-Assistent für interne Firmendokumente.
     Du antwortest ausschließlich basierend auf den bereitgestellten Dokumenten.
     Wenn du etwas nicht in den Dokumenten findest, sage das ehrlich.
     Antworte auf Deutsch, es sei denn, der Benutzer stellt die Frage auf Englisch.
     Zitiere immer die Quellen deiner Antwort.
+  enrichment_system_prompt: |
+    Du bist ein Such-Optimierer. Deine Aufgabe ist es, Suchanfragen mit relevanten
+    Fachbegriffen aus dem gegebenen Kontext anzureichern. Gib NUR die erweiterte
+    Suchanfrage zurück, KEINE Erklärungen. Wenn der Kontext nicht relevant ist,
+    gib die ursprüngliche Frage unverändert zurück.
+  free_chat_system_prompt: |
+    Du bist Atlas, ein hilfreicher KI-Assistent. Antworte klar und präzise.
+    Antworte auf Deutsch, es sei denn, der Benutzer stellt die Frage auf Englisch.
 
 # -----------------------------------------------------------------------------
-# Embedding-Konfiguration
+# Embedding-Konfiguration (llama.cpp Embedding Server)
 # -----------------------------------------------------------------------------
 embedding:
-  provider: "ollama"                  # ollama, sentence-transformers oder custom
-  base_url: "http://ollama:11434"     # Embedding API URL
-  model: "nomic-embed-text"           # Embedding-Modell
-  batch_size: 32                      # Batch-Größe für Embedding-Berechnung
-  max_retries: 3                      # Wiederholungsversuche bei Fehlern
-  timeout: 60                         # Timeout in Sekunden
+  base_url: "http://llama-cpp-embed:8081"
+  model: "pplx-embed-context-v1-0.6b-q8_0.gguf"
+  batch_size: 32
+  max_retries: 3
+  timeout: 60
 
 # -----------------------------------------------------------------------------
 # Dokument-Verarbeitung (Chunking)
 # -----------------------------------------------------------------------------
 chunking:
-  strategy: "semantic"                # fixed, sentence, semantic, recursive
-  chunk_size: 512                     # Ziel-Chunk-Größe in Tokens
-  chunk_overlap: 50                   # Überlappung zwischen Chunks in Tokens
-  min_chunk_size: 100                 # Minimale Chunk-Größe
-  max_chunk_size: 1024                # Maximale Chunk-Größe
-  separators:                         # Trennzeichen für rekursives Chunking
+  strategy: "semantic"
+  chunk_size: 512
+  chunk_overlap: 50
+  min_chunk_size: 100
+  max_chunk_size: 1024
+  separators:
     - "\n\n"
     - "\n"
     - ". "
@@ -96,17 +97,15 @@ chunking:
 # Retrieval-Konfiguration
 # -----------------------------------------------------------------------------
 retrieval:
-  top_k: 10                          # Anzahl der abgerufenen Chunks
-  rerank: true                        # Reranking aktivieren
-  rerank_model: "cross-encoder"       # Reranking-Modell
-  rerank_top_k: 5                     # Finale Anzahl nach Reranking
-  similarity_threshold: 0.3           # Minimale Ähnlichkeit (0.0-1.0)
-  hybrid_search: true                 # Kombination aus Vektor + Volltext
-  hybrid_alpha: 0.7                   # Gewichtung Vektor vs. Volltext (1.0 = nur Vektor)
-  # Query-Anreicherung: Erweitert Suchanfragen mit Kontextinformationen
-  # bevor die Retrieval-Suche ausgeführt wird
+  top_k: 10
+  rerank: true
+  rerank_model: "cross-encoder"
+  rerank_top_k: 5
+  similarity_threshold: 0.3
+  hybrid_search: true
+  hybrid_alpha: 0.7
   query_enrichment:
-    enabled: true                       # Query-Anreicherung aktivieren
+    enabled: true
 
 # -----------------------------------------------------------------------------
 # Unterstützte Dateiformate
@@ -125,30 +124,30 @@ documents:
     - ".html"
     - ".xml"
     - ".json"
-  max_file_size_mb: 100               # Maximale Dateigröße
-  ocr_enabled: true                   # OCR für gescannte PDFs
-  ocr_language: "deu+eng"             # OCR-Sprachen (Tesseract-Codes)
+  max_file_size_mb: 100
+  ocr_enabled: true
+  ocr_language: "deu+eng"
   temp_upload_dir: "/tmp/atlas_uploads"
 
 # -----------------------------------------------------------------------------
 # Authentifizierung & Autorisierung
 # -----------------------------------------------------------------------------
 auth:
-  secret_key: "${AUTH_SECRET_KEY}"     # JWT Secret Key (Umgebungsvariable)
-  algorithm: "HS256"                   # JWT Algorithmus
-  access_token_expire_minutes: 480     # Token-Gültigkeit (8 Stunden)
-  refresh_token_expire_days: 30        # Refresh-Token-Gültigkeit
-  min_password_length: 5              # Minimale Passwortlänge
-  default_admin_username: "admin"      # Standard-Admin-Benutzername
-  default_admin_password: "${ADMIN_DEFAULT_PASSWORD}" # Nur beim ersten Start
+  secret_key: "${AUTH_SECRET_KEY}"
+  algorithm: "HS256"
+  access_token_expire_minutes: 480
+  refresh_token_expire_days: 30
+  min_password_length: 5
+  default_admin_username: "admin"
+  default_admin_password: "${ADMIN_DEFAULT_PASSWORD}"
 
 # -----------------------------------------------------------------------------
 # Logging
 # -----------------------------------------------------------------------------
 logging:
-  level: "INFO"                       # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "logs/atlas.log"              # Log-Datei Pfad
-  max_file_size_mb: 50                # Maximale Log-Dateigröße
-  backup_count: 5                     # Anzahl der Log-Backups
-  log_queries: false                  # Benutzer-Queries loggen (Datenschutz!)
+  file: "logs/atlas.log"
+  max_file_size_mb: 50
+  backup_count: 5
+  log_queries: false

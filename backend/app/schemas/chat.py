@@ -8,7 +8,9 @@ from pydantic import BaseModel
 class ChatRequest(BaseModel):
     question: str
     conversation_id: int | None = None
-    collection_ids: list[int] | None = None  # Override für ausgewählte Collections
+    collection_ids: list[int] | None = None
+    enable_thinking: bool = False
+    rag_mode: bool = True
 
 
 class ChatResponse(BaseModel):
@@ -50,6 +52,7 @@ class MessageResponse(BaseModel):
     sources: list[SourceChunk] = []
     enriched_query: str | None = None
     rag_chunks: list[RagChunk] = []
+    thinking: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
