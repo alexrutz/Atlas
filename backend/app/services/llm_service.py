@@ -142,8 +142,13 @@ class LLMService:
             data = response.json()
             return data["choices"][0]["message"].get("content", "").strip()
 
-    def build_rag_prompt(self, question: str, contexts: list[dict]) -> str:
-        """Baut den RAG-Prompt aus Frage und Kontexten zusammen."""
+    def build_rag_prompt(
+        self,
+        original_question: str,
+        enriched_question: str,
+        contexts: list[dict],
+    ) -> str:
+        """Baut den RAG-Prompt aus Original-Frage, angereicherter Frage und Kontexten zusammen."""
         context_parts = []
         for i, ctx in enumerate(contexts, 1):
             source_info = f"[Quelle {i}: {ctx['document_name']}"
@@ -154,13 +159,35 @@ class LLMService:
 
         context_text = "\n\n---\n\n".join(context_parts)
 
-        return f"""Basierend auf den folgenden Dokumentenausschnitten, beantworte die Frage.
-Zitiere die Quellen in deiner Antwort mit [Quelle X].
-Wenn die Informationen nicht ausreichen, sage das ehrlich.
+        # If enriched differs from original, include both so the LLM can
+        # find the information via the enriched terms but answer using the
+        # user's original terminology.
+        if enriched_question != original_question:
+            question_block = (
+                f"ORIGINAL-FRAGE (Benutzer-Terminologie): {original_question}\n"
+                f"ANGEREICHERTE FRAGE (Suchbegriffe): {enriched_question}"
+            )
+            instruction = (
+                "Basierend auf den folgenden Dokumentenausschnitten, beantworte die Frage.\n"
+                "Die ANGEREICHERTE FRAGE enthält aufgelöste Fachbegriffe - nutze sie um die "
+                "relevanten Informationen in den Dokumenten zu finden.\n"
+                "Formuliere deine Antwort aber in der Terminologie der ORIGINAL-FRAGE des Benutzers.\n"
+                "Zitiere die Quellen in deiner Antwort mit [Quelle X].\n"
+                "Wenn die Informationen nicht ausreichen, sage das ehrlich."
+            )
+        else:
+            question_block = f"FRAGE: {original_question}"
+            instruction = (
+                "Basierend auf den folgenden Dokumentenausschnitten, beantworte die Frage.\n"
+                "Zitiere die Quellen in deiner Antwort mit [Quelle X].\n"
+                "Wenn die Informationen nicht ausreichen, sage das ehrlich."
+            )
+
+        return f"""{instruction}
 
 DOKUMENTE:
 {context_text}
 
-FRAGE: {question}
+{question_block}
 
 ANTWORT:"""

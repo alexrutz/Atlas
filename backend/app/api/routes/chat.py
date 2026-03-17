@@ -275,7 +275,7 @@ async def ask_question_stream(
             {"content": r.content, "document_name": r.document_name, "page_number": r.page_number}
             for r in results
         ]
-        prompt = pipeline.llm.build_rag_prompt(request.question, contexts)
+        prompt = pipeline.llm.build_rag_prompt(request.question, enriched_query, contexts)
 
         rag_chunks = [
             {
