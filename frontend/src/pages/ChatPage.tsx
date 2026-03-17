@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useChatStore } from '../stores/chatStore'
+import { settingsApi } from '../services/api'
 import type { SourceChunk, RagChunk } from '../types'
 
 // =============================================================================
@@ -82,8 +83,7 @@ function DebugPanel({
   const hasThinking = !!thinking
   if (!hasQuery && !hasChunks && !hasThinking) return null
 
-  // Auto-select first available tab
-  const firstTab = hasThinking ? 'thinking' : hasQuery ? 'query' : 'chunks'
+  const firstTab = hasQuery ? 'query' : hasChunks ? 'chunks' : 'thinking'
 
   return (
     <div className="mt-1">
@@ -101,18 +101,6 @@ function DebugPanel({
         <div className="mt-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs overflow-hidden">
           {/* Tabs */}
           <div className="flex border-b border-gray-200 bg-gray-100">
-            {hasThinking && (
-              <button
-                onClick={() => setActiveTab('thinking')}
-                className={`px-3 py-1.5 text-xs font-medium transition ${
-                  activeTab === 'thinking'
-                    ? 'text-purple-700 border-b-2 border-purple-500 bg-white'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Thinking
-              </button>
-            )}
             {hasQuery && (
               <button
                 onClick={() => setActiveTab('query')}
@@ -137,15 +125,22 @@ function DebugPanel({
                 Chunks ({ragChunks!.length})
               </button>
             )}
+            {hasThinking && (
+              <button
+                onClick={() => setActiveTab('thinking')}
+                className={`px-3 py-1.5 text-xs font-medium transition ${
+                  activeTab === 'thinking'
+                    ? 'text-purple-700 border-b-2 border-purple-500 bg-white'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Thinking
+              </button>
+            )}
           </div>
 
           {/* Tab Content */}
           <div className="p-3 max-h-80 overflow-y-auto">
-            {activeTab === 'thinking' && hasThinking && (
-              <div className="bg-purple-50 border border-purple-200 rounded p-3">
-                <p className="whitespace-pre-wrap text-gray-700 text-[11px] leading-relaxed">{thinking}</p>
-              </div>
-            )}
             {activeTab === 'query' && hasQuery && (
               <div className="space-y-2">
                 {originalQuery && (
@@ -182,6 +177,11 @@ function DebugPanel({
                 ))}
               </div>
             )}
+            {activeTab === 'thinking' && hasThinking && (
+              <div className="bg-purple-50 border border-purple-200 rounded p-3">
+                <p className="whitespace-pre-wrap text-gray-700 text-[11px] leading-relaxed">{thinking}</p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -196,7 +196,7 @@ function DebugPanel({
 export default function ChatPage() {
   const {
     conversations, currentConversationId, messages, collections,
-    selectedCollectionIds, isLoading, streamingContent, streamingThinking,
+    selectedCollectionIds, isLoading, streamingContent,
     enableThinking, ragMode,
     loadConversations, selectConversation,
     deleteConversation, loadCollections, toggleCollection,
@@ -205,11 +205,19 @@ export default function ChatPage() {
   } = useChatStore()
 
   const [input, setInput] = useState('')
+  const [sidebarTab, setSidebarTab] = useState<'collections' | 'context'>('collections')
+  const [globalContext, setGlobalContext] = useState('')
+  const [globalContextDraft, setGlobalContextDraft] = useState('')
+  const [globalContextSaving, setGlobalContextSaving] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadCollections()
     loadConversations()
+    settingsApi.getGlobalContext().then((d) => {
+      setGlobalContext(d.context_text)
+      setGlobalContextDraft(d.context_text)
+    }).catch(() => {})
   }, [loadCollections, loadConversations])
 
   useEffect(() => {
@@ -222,6 +230,16 @@ export default function ChatPage() {
     const question = input
     setInput('')
     await sendMessageStream(question)
+  }
+
+  const handleSaveGlobalContext = async () => {
+    setGlobalContextSaving(true)
+    try {
+      await settingsApi.updateGlobalContext(globalContextDraft)
+      setGlobalContext(globalContextDraft)
+    } finally {
+      setGlobalContextSaving(false)
+    }
   }
 
   const getOriginalQuery = (msgIndex: number): string | undefined => {
@@ -279,50 +297,101 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Collection-Sidebar */}
-      <div className="w-64 border-r bg-white p-4 overflow-y-auto flex flex-col">
-        {/* RAG / Free Chat Toggle */}
-        <div className="mb-3 pb-3 border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-gray-500 uppercase">Modus</span>
-            <div className="ml-auto flex items-center gap-1.5">
-              <span className={`text-[10px] ${ragMode ? 'text-atlas-600 font-medium' : 'text-gray-400'}`}>RAG</span>
-              <button
-                onClick={() => setRagMode(!ragMode)}
-                className={`relative w-8 h-4 rounded-full transition ${ragMode ? 'bg-atlas-500' : 'bg-gray-300'}`}
-              >
-                <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${
-                  ragMode ? 'left-0.5' : 'left-4.5 translate-x-0'
-                }`} style={{ left: ragMode ? '2px' : '18px' }} />
-              </button>
-              <span className={`text-[10px] ${!ragMode ? 'text-purple-600 font-medium' : 'text-gray-400'}`}>Frei</span>
-            </div>
-          </div>
-          {!ragMode && (
-            <p className="text-[10px] text-gray-400 mt-1">Direkte Konversation ohne Dokumentenkontext</p>
-          )}
+      {/* Right Sidebar with tabs: Collections / Allgemeiner Kontext */}
+      <div className="w-64 border-r bg-white flex flex-col">
+        {/* Tabs */}
+        <div className="flex border-b border-gray-200">
+          <button
+            onClick={() => setSidebarTab('collections')}
+            className={`flex-1 px-3 py-2 text-xs font-semibold uppercase transition ${
+              sidebarTab === 'collections'
+                ? 'text-atlas-700 border-b-2 border-atlas-500'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Collections
+          </button>
+          <button
+            onClick={() => setSidebarTab('context')}
+            className={`flex-1 px-3 py-2 text-xs font-semibold uppercase transition ${
+              sidebarTab === 'context'
+                ? 'text-atlas-700 border-b-2 border-atlas-500'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Kontext
+            {globalContext && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-atlas-500" />}
+          </button>
         </div>
 
-        {/* Collections */}
-        <h3 className="font-semibold text-sm text-gray-500 uppercase mb-3">Collections</h3>
-        {collections.length === 0 && (
-          <p className="text-xs text-gray-400">Keine Collections verfügbar</p>
-        )}
-        {collections.map((col) => (
-          <div key={col.id} className={`p-2 hover:bg-gray-50 rounded ${!ragMode ? 'opacity-50' : ''}`}>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={selectedCollectionIds.includes(col.id)}
-                onChange={() => toggleCollection(col.id)}
-                disabled={!ragMode}
-                className="rounded border-gray-300 text-atlas-600 focus:ring-atlas-500"
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col">
+          {sidebarTab === 'collections' && (
+            <>
+              {/* RAG / Free Chat Toggle */}
+              <div className="mb-3 pb-3 border-b border-gray-200">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-500 uppercase">Modus</span>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <span className={`text-[10px] ${ragMode ? 'text-atlas-600 font-medium' : 'text-gray-400'}`}>RAG</span>
+                    <button
+                      onClick={() => setRagMode(!ragMode)}
+                      className={`relative w-8 h-4 rounded-full transition ${ragMode ? 'bg-atlas-500' : 'bg-gray-300'}`}
+                    >
+                      <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform`}
+                        style={{ left: ragMode ? '2px' : '18px' }} />
+                    </button>
+                    <span className={`text-[10px] ${!ragMode ? 'text-purple-600 font-medium' : 'text-gray-400'}`}>Frei</span>
+                  </div>
+                </div>
+                {!ragMode && (
+                  <p className="text-[10px] text-gray-400 mt-1">Direkte Konversation ohne Dokumentenkontext</p>
+                )}
+              </div>
+
+              {/* Collections */}
+              {collections.length === 0 && (
+                <p className="text-xs text-gray-400">Keine Collections verfügbar</p>
+              )}
+              {collections.map((col) => (
+                <div key={col.id} className={`p-2 hover:bg-gray-50 rounded ${!ragMode ? 'opacity-50' : ''}`}>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedCollectionIds.includes(col.id)}
+                      onChange={() => toggleCollection(col.id)}
+                      disabled={!ragMode}
+                      className="rounded border-gray-300 text-atlas-600 focus:ring-atlas-500"
+                    />
+                    <span className="text-sm truncate">{col.name}</span>
+                    <span className="text-xs text-gray-400 ml-auto shrink-0">{col.document_count}</span>
+                  </label>
+                </div>
+              ))}
+            </>
+          )}
+
+          {sidebarTab === 'context' && (
+            <div className="flex flex-col flex-1">
+              <p className="text-xs text-gray-400 mb-2">
+                Allgemeiner Kontext für alle Collections und Suchanfragen.
+              </p>
+              <textarea
+                value={globalContextDraft}
+                onChange={(e) => setGlobalContextDraft(e.target.value)}
+                placeholder="Allgemeiner Kontext für alle Collections..."
+                className="flex-1 w-full text-xs p-2 border rounded resize-none focus:ring-1 focus:ring-atlas-500 outline-none"
               />
-              <span className="text-sm truncate">{col.name}</span>
-              <span className="text-xs text-gray-400 ml-auto shrink-0">{col.document_count}</span>
-            </label>
-          </div>
-        ))}
+              <button
+                onClick={handleSaveGlobalContext}
+                disabled={globalContextSaving || globalContextDraft === globalContext}
+                className="mt-2 w-full text-xs px-2 py-1.5 bg-atlas-600 text-white rounded hover:bg-atlas-700 disabled:opacity-50 transition"
+              >
+                {globalContextSaving ? 'Speichern...' : 'Kontext speichern'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Chat-Bereich */}
@@ -374,25 +443,17 @@ export default function ChatPage() {
             </div>
           ))}
           {/* Streaming-Anzeige */}
-          {isLoading && (streamingContent || streamingThinking) && (
+          {isLoading && streamingContent && (
             <div className="flex flex-col items-start gap-1">
-              {streamingThinking && (
-                <div className="max-w-3xl bg-purple-50 border border-purple-200 rounded-lg p-3 text-xs">
-                  <span className="text-purple-600 font-medium text-[10px] block mb-1">Thinking...</span>
-                  <p className="whitespace-pre-wrap text-gray-600">{streamingThinking}</p>
+              <div className="max-w-3xl bg-white border rounded-lg p-4 shadow-sm">
+                <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-li:my-0">
+                  <ReactMarkdown>{streamingContent}</ReactMarkdown>
                 </div>
-              )}
-              {streamingContent && (
-                <div className="max-w-3xl bg-white border rounded-lg p-4 shadow-sm">
-                  <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-li:my-0">
-                    <ReactMarkdown>{streamingContent}</ReactMarkdown>
-                  </div>
-                  <span className="inline-block w-2 h-4 bg-atlas-500 animate-pulse ml-0.5" />
-                </div>
-              )}
+                <span className="inline-block w-2 h-4 bg-atlas-500 animate-pulse ml-0.5" />
+              </div>
             </div>
           )}
-          {isLoading && !streamingContent && !streamingThinking && (
+          {isLoading && !streamingContent && (
             <div className="flex justify-start">
               <div className="bg-white border rounded-lg p-4 shadow-sm">
                 <div className="flex items-center gap-2">

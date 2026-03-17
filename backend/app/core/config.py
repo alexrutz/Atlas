@@ -61,8 +61,8 @@ class LLMConfig(BaseModel):
     temperature: float = 0.1
     top_p: float = 0.9
     top_k: int = 40
-    max_tokens: int = 4096
-    context_window: int = 8192
+    max_tokens: int = 65536
+    context_window: int = 65536
     repeat_penalty: float = 1.1
     timeout: int = 120
     system_prompt: str = ""
