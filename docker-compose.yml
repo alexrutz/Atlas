@@ -130,6 +130,27 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
+  # LLM Diagnostic Viewer (tails diagnostic log with colored output)
+  # ---------------------------------------------------------------------------
+  llm-diagnostic:
+    image: alpine:3.20
+    container_name: atlas-llm-diagnostic
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for diagnostic log file..."
+        while [ ! -f /logs/llm_diagnostic.log ]; do sleep 1; done
+        echo "Tailing LLM diagnostic log..."
+        tail -f /logs/llm_diagnostic.log
+    volumes:
+      - ./logs:/logs:ro
+    depends_on:
+      - backend
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
   # Atlas Frontend (React)
   # ---------------------------------------------------------------------------
   frontend:

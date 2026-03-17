@@ -1,7 +1,7 @@
 """
-LLM Service - Kommunikation mit llama.cpp über die OpenAI-kompatible API.
+LLM Service - Communication with llama.cpp via the OpenAI-compatible API.
 
-Unterstützt Streaming, Thinking-Modus und verschiedene System-Prompts.
+Supports streaming, thinking mode, and different system prompts.
 """
 
 import json
@@ -11,12 +11,17 @@ from collections.abc import AsyncGenerator
 import httpx
 
 from app.core.config import settings
+from app.services.llm_diagnostic import (
+    log_enrichment_call,
+    log_rag_call,
+    log_rag_stream_complete,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    """Kommunikation mit llama.cpp über die OpenAI-kompatible API."""
+    """Communication with llama.cpp via the OpenAI-compatible API."""
 
     def __init__(self):
         self.config = settings.llm
@@ -29,10 +34,10 @@ class LLMService:
         enable_thinking: bool = False,
     ) -> dict:
         """
-        Generiert eine vollständige Antwort (nicht-streaming).
+        Generate a complete response (non-streaming).
 
         Returns:
-            Dict mit 'content' und optional 'thinking'
+            Dict with 'content' and optional 'thinking'
         """
         system = system_prompt or self.config.system_prompt
         messages = [
@@ -50,18 +55,45 @@ class LLMService:
         }
         logger.info(f"generate: enable_thinking={enable_thinking}")
 
-        async with httpx.AsyncClient(timeout=600.0) as client:
-            response = await client.post(
-                f"{self.base_url}/v1/chat/completions",
-                json=body,
+        # Diagnostic: log input
+        log_rag_call(
+            system_prompt=system,
+            user_prompt=prompt,
+            enable_thinking=enable_thinking,
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/v1/chat/completions",
+                    json=body,
+                )
+                response.raise_for_status()
+                data = response.json()
+                choice = data["choices"][0]["message"]
+                result = {
+                    "content": choice.get("content", ""),
+                    "thinking": choice.get("reasoning_content", ""),
+                }
+
+                # Diagnostic: log output
+                log_rag_call(
+                    system_prompt=system,
+                    user_prompt=prompt,
+                    enable_thinking=enable_thinking,
+                    output=result["content"],
+                    thinking=result["thinking"] or None,
+                )
+
+                return result
+        except Exception as e:
+            log_rag_call(
+                system_prompt=system,
+                user_prompt=prompt,
+                enable_thinking=enable_thinking,
+                error=str(e),
             )
-            response.raise_for_status()
-            data = response.json()
-            choice = data["choices"][0]["message"]
-            return {
-                "content": choice.get("content", ""),
-                "thinking": choice.get("reasoning_content", ""),
-            }
+            raise
 
     async def generate_stream(
         self,
@@ -70,10 +102,10 @@ class LLMService:
         enable_thinking: bool = False,
     ) -> AsyncGenerator[dict, None]:
         """
-        Generiert eine Antwort als Stream.
+        Generate a response as a stream.
 
         Yields:
-            Dicts mit 'type' ('thinking' oder 'content') und 'text'
+            Dicts with 'type' ('thinking' or 'content') and 'text'
         """
         system = system_prompt or self.config.system_prompt
         messages = [
@@ -90,6 +122,14 @@ class LLMService:
             "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
         }
         logger.info(f"generate_stream: enable_thinking={enable_thinking}")
+
+        # Diagnostic: log stream start
+        log_rag_call(
+            system_prompt=system,
+            user_prompt=prompt,
+            enable_thinking=enable_thinking,
+            is_stream_start=True,
+        )
 
         timeout = httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -133,14 +173,39 @@ class LLMService:
             "chat_template_kwargs": {"enable_thinking": False},
         }
 
-        async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-            response = await client.post(
-                f"{self.base_url}/v1/chat/completions",
-                json=body,
+        # Diagnostic: log enrichment input
+        log_enrichment_call(
+            system_prompt=system,
+            user_prompt=prompt,
+            output="(calling...)",
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/v1/chat/completions",
+                    json=body,
+                )
+                response.raise_for_status()
+                data = response.json()
+                result = data["choices"][0]["message"].get("content", "").strip()
+
+                # Diagnostic: log enrichment output
+                log_enrichment_call(
+                    system_prompt=system,
+                    user_prompt=prompt,
+                    output=result,
+                )
+
+                return result
+        except Exception as e:
+            log_enrichment_call(
+                system_prompt=system,
+                user_prompt=prompt,
+                output="",
+                error=str(e),
             )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"].get("content", "").strip()
+            raise
 
     def build_rag_prompt(
         self,
@@ -148,12 +213,12 @@ class LLMService:
         enriched_question: str,
         contexts: list[dict],
     ) -> str:
-        """Baut den RAG-Prompt aus Original-Frage, angereicherter Frage und Kontexten zusammen."""
+        """Build the RAG prompt from original question, enriched question and contexts."""
         context_parts = []
         for i, ctx in enumerate(contexts, 1):
-            source_info = f"[Quelle {i}: {ctx['document_name']}"
+            source_info = f"[Source {i}: {ctx['document_name']}"
             if ctx.get("page_number"):
-                source_info += f", Seite {ctx['page_number']}"
+                source_info += f", page {ctx['page_number']}"
             source_info += "]"
             context_parts.append(f"{source_info}\n{ctx['content']}")
 
@@ -164,30 +229,30 @@ class LLMService:
         # user's original terminology.
         if enriched_question != original_question:
             question_block = (
-                f"ORIGINAL-FRAGE (Benutzer-Terminologie): {original_question}\n"
-                f"ANGEREICHERTE FRAGE (Suchbegriffe): {enriched_question}"
+                f"ORIGINAL QUESTION (user terminology): {original_question}\n"
+                f"ENRICHED QUESTION (search terms): {enriched_question}"
             )
             instruction = (
-                "Basierend auf den folgenden Dokumentenausschnitten, beantworte die Frage.\n"
-                "Die ANGEREICHERTE FRAGE enthält aufgelöste Fachbegriffe - nutze sie um die "
-                "relevanten Informationen in den Dokumenten zu finden.\n"
-                "Formuliere deine Antwort aber in der Terminologie der ORIGINAL-FRAGE des Benutzers.\n"
-                "Zitiere die Quellen in deiner Antwort mit [Quelle X].\n"
-                "Wenn die Informationen nicht ausreichen, sage das ehrlich."
+                "Based on the following document excerpts, answer the question.\n"
+                "The ENRICHED QUESTION contains resolved technical terms - use them to "
+                "find the relevant information in the documents.\n"
+                "Formulate your answer using the terminology from the ORIGINAL QUESTION.\n"
+                "Cite the sources in your answer with [Source X].\n"
+                "If the information is insufficient, say so honestly."
             )
         else:
-            question_block = f"FRAGE: {original_question}"
+            question_block = f"QUESTION: {original_question}"
             instruction = (
-                "Basierend auf den folgenden Dokumentenausschnitten, beantworte die Frage.\n"
-                "Zitiere die Quellen in deiner Antwort mit [Quelle X].\n"
-                "Wenn die Informationen nicht ausreichen, sage das ehrlich."
+                "Based on the following document excerpts, answer the question.\n"
+                "Cite the sources in your answer with [Source X].\n"
+                "If the information is insufficient, say so honestly."
             )
 
         return f"""{instruction}
 
-DOKUMENTE:
+DOCUMENTS:
 {context_text}
 
 {question_block}
 
-ANTWORT:"""
+ANSWER:"""

@@ -17,6 +17,11 @@ from app.schemas.chat import (
     MessageResponse, SelectedCollectionsUpdate, SourceChunk,
 )
 from app.services.rag_pipeline import RAGPipeline
+from app.services.llm_diagnostic import (
+    log_free_chat_call,
+    log_free_chat_stream_complete,
+    log_rag_stream_complete,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +192,12 @@ async def ask_question_stream(
             async def free_chat_stream():
                 full_answer = ""
                 full_thinking = ""
+                log_free_chat_call(
+                    system_prompt=system,
+                    user_prompt=request.question,
+                    enable_thinking=request.enable_thinking,
+                    is_stream_start=True,
+                )
                 try:
                     async for chunk in pipeline.llm.generate_stream(
                         request.question,
@@ -201,6 +212,11 @@ async def ask_question_stream(
                             full_answer += chunk["text"]
                             data = json.dumps({"type": "token", "content": chunk["text"]})
                             yield f"data: {data}\n\n"
+
+                    log_free_chat_stream_complete(
+                        output=full_answer,
+                        thinking=full_thinking or None,
+                    )
 
                     conv_id = await pipeline._save_to_conversation(
                         user=current_user,
@@ -319,6 +335,12 @@ async def ask_question_stream(
                         data = json.dumps({"type": "token", "content": chunk["text"]})
                         yield f"data: {data}\n\n"
 
+                # Diagnostic: log stream completion
+                log_rag_stream_complete(
+                    output=full_answer,
+                    thinking=full_thinking or None,
+                )
+
                 # Save conversation
                 conv_id = await pipeline._save_to_conversation(
                     user=current_user,
@@ -336,7 +358,7 @@ async def ask_question_stream(
                 done_data = json.dumps({"type": "done", "conversation_id": conv_id})
                 yield f"data: {done_data}\n\n"
             except Exception as e:
-                logger.error(f"Streaming-Fehler: {e}", exc_info=True)
+                logger.error(f"Streaming error: {e}", exc_info=True)
                 error_data = json.dumps({"type": "error", "content": str(e)})
                 yield f"data: {error_data}\n\n"
 

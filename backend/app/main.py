@@ -17,8 +17,12 @@ from app.core.database import engine, Base, async_session
 from app.core.security import hash_password
 from app.api.routes import auth, users, groups, collections, documents, chat, docker
 from app.api.routes import settings as settings_router
+from app.services.llm_diagnostic import setup_diagnostic_logging
 
 logger = logging.getLogger(__name__)
+
+# Initialize diagnostic logging for LLM calls
+setup_diagnostic_logging()
 
 
 async def seed_admin_user():
