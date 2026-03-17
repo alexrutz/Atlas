@@ -111,7 +111,7 @@ CREATE TABLE chunks (
     page_number     INTEGER,                   -- Seitennummer (bei PDFs)
     token_count     INTEGER,                   -- Anzahl Tokens
     metadata        JSONB DEFAULT '{}',        -- Zusätzliche Metadaten
-    embedding       vector(768),               -- Embedding-Vektor, Dimension muss vector.dimensions in config.yaml entsprechen
+    embedding       vector(1024),              -- Embedding-Vektor, Dimension muss vector.dimensions in config.yaml entsprechen
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(document_id, chunk_index)
 );

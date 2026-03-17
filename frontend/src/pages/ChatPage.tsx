@@ -2,7 +2,7 @@
  * ChatPage - Hauptseite mit Chatfenster, Collection-Auswahl und Konversationsverlauf.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useChatStore } from '../stores/chatStore'
 import type { SourceChunk, RagChunk } from '../types'

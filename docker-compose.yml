@@ -34,7 +34,7 @@ services:
   # llama.cpp - LLM Server (OpenAI-kompatible API)
   # ---------------------------------------------------------------------------
   llama-cpp:
-    image: ghcr.io/ggerganov/llama.cpp:server
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: atlas-llama-cpp
     restart: unless-stopped
     ports:
@@ -68,7 +68,7 @@ services:
   # llama.cpp - Embedding Server
   # ---------------------------------------------------------------------------
   llama-cpp-embed:
-    image: ghcr.io/ggerganov/llama.cpp:server
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: atlas-llama-cpp-embed
     restart: unless-stopped
     ports:
