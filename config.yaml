@@ -49,8 +49,8 @@ llm:
   temperature: 0.1
   top_p: 0.9
   top_k: 40
-  max_tokens: 4096
-  context_window: 8192
+  max_tokens: 65536
+  context_window: 65536
   repeat_penalty: 1.1
   timeout: 120
   system_prompt: |
@@ -60,10 +60,7 @@ llm:
     Antworte auf Deutsch, es sei denn, der Benutzer stellt die Frage auf Englisch.
     Zitiere immer die Quellen deiner Antwort.
   enrichment_system_prompt: |
-    Du bist ein Such-Optimierer. Deine Aufgabe ist es, Suchanfragen mit relevanten
-    Fachbegriffen aus dem gegebenen Kontext anzureichern. Gib NUR die erweiterte
-    Suchanfrage zurück, KEINE Erklärungen. Wenn der Kontext nicht relevant ist,
-    gib die ursprüngliche Frage unverändert zurück.
+    You are part of an RAG-Workflow and you rephrase the starting query to include only the relevant information from context and the starting query and formulate the resulting query.
   free_chat_system_prompt: |
     Du bist Atlas, ein hilfreicher KI-Assistent. Antworte klar und präzise.
     Antworte auf Deutsch, es sei denn, der Benutzer stellt die Frage auf Englisch.

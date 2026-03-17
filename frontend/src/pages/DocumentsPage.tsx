@@ -2,13 +2,15 @@
  * DocumentsPage - Dokumentenverwaltung mit Upload.
  *
  * Layout:
- * - Left: Collection-Liste mit globalem Kontext
- * - Right: Upload + Kontext (50/50) + Dokumentenliste
+ * - Left sidebar: Collection-Liste
+ * - Main area: Two columns
+ *   - Left column: Upload + Dokumentenliste
+ *   - Right column: Collection-Kontext (große Textarea)
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { collectionsApi, documentsApi, settingsApi } from '../services/api'
+import { collectionsApi, documentsApi } from '../services/api'
 import type { Collection, Document as DocType } from '../types'
 
 export default function DocumentsPage() {
@@ -17,10 +19,6 @@ export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocType[]>([])
   const [contextDraft, setContextDraft] = useState('')
   const [contextSaving, setContextSaving] = useState(false)
-  const [globalContext, setGlobalContext] = useState('')
-  const [globalContextDraft, setGlobalContextDraft] = useState('')
-  const [showGlobalContext, setShowGlobalContext] = useState(false)
-  const [globalContextSaving, setGlobalContextSaving] = useState(false)
 
   const loadCollections = useCallback(async () => {
     const data = await collectionsApi.list()
@@ -29,10 +27,6 @@ export default function DocumentsPage() {
 
   useEffect(() => {
     loadCollections()
-    settingsApi.getGlobalContext().then((d) => {
-      setGlobalContext(d.context_text)
-      setGlobalContextDraft(d.context_text)
-    }).catch(() => {})
   }, [loadCollections])
 
   useEffect(() => {
@@ -65,16 +59,6 @@ export default function DocumentsPage() {
     }
   }, [selectedCollection, contextDraft])
 
-  const handleSaveGlobalContext = useCallback(async () => {
-    setGlobalContextSaving(true)
-    try {
-      await settingsApi.updateGlobalContext(globalContextDraft)
-      setGlobalContext(globalContextDraft)
-    } finally {
-      setGlobalContextSaving(false)
-    }
-  }, [globalContextDraft])
-
   return (
     <div className="flex h-full">
       {/* Collection-Liste */}
@@ -98,88 +82,56 @@ export default function DocumentsPage() {
             <div className="text-xs text-gray-400">{col.document_count} Dokumente</div>
           </button>
         ))}
-
-        {/* Globaler Kontext */}
-        <div className="mt-auto pt-4 border-t border-gray-200">
-          <button
-            onClick={() => { setShowGlobalContext(!showGlobalContext); setGlobalContextDraft(globalContext) }}
-            className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-atlas-600 uppercase w-full"
-          >
-            <span className={`inline-block transition-transform text-[10px] ${showGlobalContext ? 'rotate-90' : ''}`}>&#9654;</span>
-            Allgemeiner Kontext
-            {globalContext && <span className="ml-auto w-2 h-2 rounded-full bg-atlas-500 shrink-0" title="Kontext gesetzt" />}
-          </button>
-          {showGlobalContext && (
-            <div className="mt-2">
-              <textarea
-                value={globalContextDraft}
-                onChange={(e) => setGlobalContextDraft(e.target.value)}
-                placeholder="Allgemeiner Kontext für alle Collections..."
-                className="w-full text-xs p-2 border rounded resize-none focus:ring-1 focus:ring-atlas-500 outline-none"
-                rows={4}
-              />
-              <button
-                onClick={handleSaveGlobalContext}
-                disabled={globalContextSaving || globalContextDraft === globalContext}
-                className="mt-1 text-[10px] px-2 py-0.5 bg-atlas-600 text-white rounded hover:bg-atlas-700 disabled:opacity-50"
-              >
-                {globalContextSaving ? 'Speichern...' : 'Speichern'}
-              </button>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Hauptbereich */}
-      <div className="flex-1 p-6 overflow-y-auto min-w-0">
+      <div className="flex-1 overflow-y-auto min-w-0">
         {!selectedCollection ? (
           <div className="text-center text-gray-400 mt-20">
             Wählen Sie eine Collection aus der Liste.
           </div>
         ) : (
-          <div className="max-w-4xl">
-            <h2 className="text-xl font-bold mb-4">{selectedCollection.name}</h2>
-            {selectedCollection.description && (
-              <p className="text-gray-600 mb-6">{selectedCollection.description}</p>
-            )}
+          <div className="flex h-full">
+            {/* Linke Spalte: Upload + Dokumentenliste */}
+            <div className="flex-1 p-6 overflow-y-auto border-r">
+              <h2 className="text-xl font-bold mb-4">{selectedCollection.name}</h2>
+              {selectedCollection.description && (
+                <p className="text-gray-600 mb-6">{selectedCollection.description}</p>
+              )}
 
-            {/* Upload + Kontext 50/50 */}
-            <div className="flex gap-4 mb-8">
-              {/* Upload-Bereich */}
-              <div className="flex-1">
-                <UploadSection
-                  collectionId={selectedCollection.id}
-                  onUploadComplete={() => { loadDocuments(); loadCollections() }}
-                />
-              </div>
+              <UploadSection
+                collectionId={selectedCollection.id}
+                onUploadComplete={() => { loadDocuments(); loadCollections() }}
+              />
 
-              {/* Collection-Kontext */}
-              <div className="flex-1 flex flex-col">
-                <h3 className="font-semibold mb-3 text-sm">Collection-Kontext</h3>
-                <p className="text-xs text-gray-400 mb-2">
-                  Variablen, Abkürzungen und Fachbegriffe für die Suchanreicherung.
-                </p>
-                <textarea
-                  value={contextDraft}
-                  onChange={(e) => setContextDraft(e.target.value)}
-                  placeholder="z.B. L1 = Kühlerlänge, B2 = Gehäusebreite..."
-                  className="flex-1 w-full text-sm p-3 border rounded-lg resize-none focus:ring-2 focus:ring-atlas-500 outline-none min-h-[120px]"
+              <div className="mt-6">
+                <DocumentList
+                  documents={documents}
+                  onRefresh={loadDocuments}
                 />
-                <button
-                  onClick={handleSaveContext}
-                  disabled={contextSaving || contextDraft === (selectedCollection.context_text || '')}
-                  className="mt-2 w-full px-3 py-2 text-sm bg-atlas-600 text-white rounded-lg hover:bg-atlas-700 disabled:opacity-50 transition"
-                >
-                  {contextSaving ? 'Speichern...' : 'Kontext speichern'}
-                </button>
               </div>
             </div>
 
-            {/* Dokumentenliste */}
-            <DocumentList
-              documents={documents}
-              onRefresh={loadDocuments}
-            />
+            {/* Rechte Spalte: Collection-Kontext */}
+            <div className="flex-1 p-6 flex flex-col">
+              <h3 className="font-semibold mb-2 text-sm">Collection-Kontext</h3>
+              <p className="text-xs text-gray-400 mb-3">
+                Variablen, Abkürzungen und Fachbegriffe für die Suchanreicherung.
+              </p>
+              <textarea
+                value={contextDraft}
+                onChange={(e) => setContextDraft(e.target.value)}
+                placeholder="z.B. L1 = Kühlerlänge, B2 = Gehäusebreite..."
+                className="flex-1 w-full text-sm p-3 border rounded-lg resize-none focus:ring-2 focus:ring-atlas-500 outline-none"
+              />
+              <button
+                onClick={handleSaveContext}
+                disabled={contextSaving || contextDraft === (selectedCollection.context_text || '')}
+                className="mt-2 w-full px-3 py-2 text-sm bg-atlas-600 text-white rounded-lg hover:bg-atlas-700 disabled:opacity-50 transition"
+              >
+                {contextSaving ? 'Speichern...' : 'Kontext speichern'}
+              </button>
+            </div>
           </div>
         )}
       </div>
