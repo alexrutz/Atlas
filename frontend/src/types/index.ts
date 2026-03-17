@@ -98,6 +98,7 @@ export interface Message {
   sources: SourceChunk[]
   enriched_query?: string | null
   rag_chunks?: RagChunk[]
+  thinking?: string | null
   created_at: string
 }
 
@@ -114,4 +115,35 @@ export interface ChatResponse {
   answer: string
   conversation_id: number
   sources: SourceChunk[]
+}
+
+// --- Docker ---
+export interface DockerContainer {
+  id: string
+  name: string
+  image: string
+  status: string
+  state: string
+  ports: Record<string, unknown>
+  created: string
+}
+
+export interface DockerImage {
+  id: string
+  tags: string[]
+  size: number
+  created: string
+}
+
+export interface DockerVolume {
+  name: string
+  driver: string
+  mountpoint: string
+  created: string | null
+}
+
+export interface BulkActionResult {
+  id: string
+  status: string
+  message: string
 }

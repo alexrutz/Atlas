@@ -14,7 +14,10 @@ interface ChatState {
   selectedCollectionIds: number[]
   isLoading: boolean
   streamingContent: string
+  streamingThinking: string
   globalContext: string
+  enableThinking: boolean
+  ragMode: boolean
 
   loadConversations: () => Promise<void>
   selectConversation: (id: number) => Promise<void>
@@ -29,6 +32,8 @@ interface ChatState {
   loadGlobalContext: () => Promise<void>
   updateGlobalContext: (text: string) => Promise<void>
   updateCollectionContext: (collectionId: number, text: string) => Promise<void>
+  setEnableThinking: (enabled: boolean) => void
+  setRagMode: (enabled: boolean) => void
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -39,7 +44,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectedCollectionIds: [],
   isLoading: false,
   streamingContent: '',
+  streamingThinking: '',
   globalContext: '',
+  enableThinking: false,
+  ragMode: true,
 
   loadConversations: async () => {
     const conversations = await chatApi.listConversations()
@@ -75,24 +83,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (question) => {
-    const { currentConversationId, selectedCollectionIds } = get()
+    const { currentConversationId, selectedCollectionIds, enableThinking, ragMode } = get()
     set({ isLoading: true })
     try {
-      const response = await chatApi.ask(question, currentConversationId ?? undefined, selectedCollectionIds)
+      const response = await chatApi.ask(
+        question, currentConversationId ?? undefined, selectedCollectionIds,
+        enableThinking, ragMode,
+      )
 
       const userMsg: Message = {
-        id: Date.now(),
-        role: 'user',
-        content: question,
-        sources: [],
+        id: Date.now(), role: 'user', content: question, sources: [],
         created_at: new Date().toISOString(),
       }
       const assistantMsg: Message = {
-        id: Date.now() + 1,
-        role: 'assistant',
-        content: response.answer,
-        sources: response.sources,
-        created_at: new Date().toISOString(),
+        id: Date.now() + 1, role: 'assistant', content: response.answer,
+        sources: response.sources, created_at: new Date().toISOString(),
       }
 
       set((state) => ({
@@ -108,13 +113,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessageStream: async (question) => {
-    const { currentConversationId, selectedCollectionIds } = get()
+    const { currentConversationId, selectedCollectionIds, enableThinking, ragMode } = get()
 
     const userMsg: Message = {
-      id: Date.now(),
-      role: 'user',
-      content: question,
-      sources: [],
+      id: Date.now(), role: 'user', content: question, sources: [],
       created_at: new Date().toISOString(),
     }
 
@@ -122,10 +124,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [...state.messages, userMsg],
       isLoading: true,
       streamingContent: '',
+      streamingThinking: '',
     }))
 
     try {
-      const response = await chatApi.askStream(question, currentConversationId ?? undefined, selectedCollectionIds)
+      const response = await chatApi.askStream(
+        question, currentConversationId ?? undefined, selectedCollectionIds,
+        enableThinking, ragMode,
+      )
 
       if (!response.ok) {
         const errorText = await response.text()
@@ -137,6 +143,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const decoder = new TextDecoder()
       let fullContent = ''
+      let fullThinking = ''
       let sources: SourceChunk[] = []
       let conversationId = currentConversationId
       let enrichedQuery: string | null = null
@@ -160,10 +167,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (event.type === 'token') {
               fullContent += event.content
               set({ streamingContent: fullContent })
+            } else if (event.type === 'thinking') {
+              fullThinking += event.content
+              set({ streamingThinking: fullThinking })
             } else if (event.type === 'debug_info') {
               enrichedQuery = event.enriched_query
               ragChunks = event.rag_chunks || []
-              // Attach enriched_query to the user message
               set((state) => ({
                 messages: state.messages.map((m) =>
                   m.id === userMsg.id ? { ...m, enriched_query: enrichedQuery } : m
@@ -190,6 +199,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         sources,
         enriched_query: enrichedQuery,
         rag_chunks: ragChunks,
+        thinking: fullThinking || null,
         created_at: new Date().toISOString(),
       }
 
@@ -197,6 +207,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         messages: [...state.messages, assistantMsg],
         currentConversationId: conversationId,
         streamingContent: '',
+        streamingThinking: '',
       }))
 
       get().loadConversations()
@@ -211,6 +222,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((state) => ({
         messages: [...state.messages, errorMsg],
         streamingContent: '',
+        streamingThinking: '',
       }))
     } finally {
       set({ isLoading: false })
@@ -238,7 +250,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   clearChat: () => {
-    set({ currentConversationId: null, messages: [], streamingContent: '' })
+    set({ currentConversationId: null, messages: [], streamingContent: '', streamingThinking: '' })
   },
 
   loadGlobalContext: async () => {
@@ -262,5 +274,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         c.id === collectionId ? { ...c, context_text: text } : c
       ),
     }))
+  },
+
+  setEnableThinking: (enabled: boolean) => {
+    set({ enableThinking: enabled })
+  },
+
+  setRagMode: (enabled: boolean) => {
+    set({ ragMode: enabled })
   },
 }))

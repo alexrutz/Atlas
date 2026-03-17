@@ -1,14 +1,12 @@
 /**
  * Atlas API Client
- *
- * Zentraler HTTP-Client für alle Backend-Kommunikation.
- * Fügt automatisch den JWT-Token zu Requests hinzu.
  */
 
 import axios from 'axios'
 import type {
   LoginResponse, Collection, Document, AccessInfo,
   Conversation, Message, ChatResponse, Group, UserDetail,
+  DockerContainer, DockerImage, DockerVolume, BulkActionResult,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -151,12 +149,6 @@ export interface ModelConfig {
   embedding_model: string
 }
 
-export interface OllamaModel {
-  name: string
-  size: number | null
-  parameter_size: string | null
-}
-
 export const settingsApi = {
   getGlobalContext: () =>
     api.get<{ context_text: string }>('/settings/global-context').then(r => r.data),
@@ -164,10 +156,6 @@ export const settingsApi = {
     api.put<{ context_text: string }>('/settings/global-context', { context_text: contextText }).then(r => r.data),
   getModelConfig: () =>
     api.get<ModelConfig>('/settings/models').then(r => r.data),
-  updateModelConfig: (data: { llm_model?: string; embedding_model?: string }) =>
-    api.put<ModelConfig>('/settings/models', data).then(r => r.data),
-  getAvailableModels: () =>
-    api.get<{ models: OllamaModel[] }>('/settings/models/available').then(r => r.data),
 }
 
 // --- Chat ---
@@ -177,9 +165,12 @@ export const chatApi = {
   deleteConversation: (id: number) => api.delete(`/conversations/${id}`),
   getMessages: (conversationId: number) =>
     api.get<Message[]>(`/conversations/${conversationId}/messages`).then(r => r.data),
-  ask: (question: string, conversationId?: number, collectionIds?: number[]) =>
-    api.post<ChatResponse>('/chat', { question, conversation_id: conversationId, collection_ids: collectionIds }).then(r => r.data),
-  askStream: (question: string, conversationId?: number, collectionIds?: number[]) => {
+  ask: (question: string, conversationId?: number, collectionIds?: number[], enableThinking?: boolean, ragMode?: boolean) =>
+    api.post<ChatResponse>('/chat', {
+      question, conversation_id: conversationId, collection_ids: collectionIds,
+      enable_thinking: enableThinking ?? false, rag_mode: ragMode ?? true,
+    }).then(r => r.data),
+  askStream: (question: string, conversationId?: number, collectionIds?: number[], enableThinking?: boolean, ragMode?: boolean) => {
     const token = localStorage.getItem('atlas_token')
     return fetch('/api/chat/stream', {
       method: 'POST',
@@ -187,11 +178,27 @@ export const chatApi = {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ question, conversation_id: conversationId, collection_ids: collectionIds }),
+      body: JSON.stringify({
+        question, conversation_id: conversationId, collection_ids: collectionIds,
+        enable_thinking: enableThinking ?? false, rag_mode: ragMode ?? true,
+      }),
     })
   },
   updateSelectedCollections: (collectionIds: number[]) =>
     api.put('/chat/collections', { collection_ids: collectionIds }),
+}
+
+// --- Docker ---
+export const dockerApi = {
+  listContainers: () => api.get<DockerContainer[]>('/docker/containers').then(r => r.data),
+  restartContainers: (ids: string[]) =>
+    api.post<{ results: BulkActionResult[] }>('/docker/containers/restart', { ids }).then(r => r.data),
+  listImages: () => api.get<DockerImage[]>('/docker/images').then(r => r.data),
+  rebuildImages: (ids: string[]) =>
+    api.post<{ results: BulkActionResult[] }>('/docker/images/rebuild', { ids }).then(r => r.data),
+  listVolumes: () => api.get<DockerVolume[]>('/docker/volumes').then(r => r.data),
+  deleteVolumes: (ids: string[]) =>
+    api.post<{ results: BulkActionResult[] }>('/docker/volumes/delete', { ids }).then(r => r.data),
 }
 
 export default api

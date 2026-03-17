@@ -1,12 +1,10 @@
 """
 RAG Pipeline - Orchestriert den gesamten Frage-Antwort-Prozess.
 
-Dies ist die zentrale Komponente, die alle Services zusammenführt:
-1. Berechtigungsprüfung
-2. Query-Anreicherung (Kontext → erweiterte Suchanfrage)
-3. Retrieval (Hybrid-Suche mit angereicherter Query)
-4. LLM-Prompt-Erstellung
-5. Antwort-Generierung
+Unterstützt:
+- RAG-Modus: Retrieval + Antwortgenerierung mit Dokumentenkontext
+- Free-Chat-Modus: Direkte Konversation ohne Dokumentenkontext
+- Thinking-Modus: Zeigt den Denkprozess des LLMs
 """
 
 import logging
@@ -42,29 +40,22 @@ class RAGPipeline:
         user: User,
         conversation_id: int | None = None,
         collection_ids: list[int] | None = None,
+        enable_thinking: bool = False,
+        rag_mode: bool = True,
     ) -> ChatResponse:
-        """
-        Verarbeitet eine Benutzerfrage durch die RAG-Pipeline.
+        """Verarbeitet eine Benutzerfrage."""
+        if not rag_mode:
+            return await self._free_chat(question, user, conversation_id, enable_thinking)
 
-        Args:
-            question: Die Frage des Benutzers
-            user: Der authentifizierte Benutzer
-            conversation_id: Optionale Konversations-ID für Chatverlauf
-            collection_ids: Optionale Collection-IDs (überschreibt Benutzerauswahl)
-
-        Returns:
-            ChatResponse mit Antwort und Quellen
-        """
         # 1. Erlaubte Collections ermitteln
         allowed_ids = await self._get_allowed_collection_ids(user)
         if not allowed_ids:
             return ChatResponse(
-                answer="Sie haben keinen Zugriff auf Collections. Bitte wenden Sie sich an einen Administrator.",
+                answer="Sie haben keinen Zugriff auf Collections.",
                 conversation_id=conversation_id or 0,
                 sources=[],
             )
 
-        # Ausgewählte Collections filtern (nur erlaubte)
         if collection_ids:
             search_ids = [cid for cid in collection_ids if cid in allowed_ids]
         else:
@@ -77,41 +68,34 @@ class RAGPipeline:
                 sources=[],
             )
 
-        # 2. Query-Anreicherung - Suchanfrage mit Kontext erweitern
+        # 2. Query-Anreicherung
         enriched_query = await self.query_enrichment.enrich_query(
             query=question, collection_ids=search_ids,
         )
 
-        # 3. Retrieval - relevante Chunks suchen (mit angereicherter Query)
-        logger.info(f"Suche in Collections: {search_ids}")
+        # 3. Retrieval
         results = await self.retrieval.search(query=enriched_query, collection_ids=search_ids)
 
-        # Fallback: Bei leeren Ergebnissen mit Original-Query erneut suchen
         if not results and enriched_query != question:
-            logger.info("Angereicherte Query lieferte keine Ergebnisse, Fallback auf Original-Query")
             results = await self.retrieval.search(query=question, collection_ids=search_ids)
 
         if not results:
-            logger.warning(f"Keine Ergebnisse für Query '{question}' in Collections {search_ids}")
             return ChatResponse(
-                answer="Zu Ihrer Frage wurden keine relevanten Informationen in den ausgewählten Dokumenten gefunden.",
+                answer="Keine relevanten Informationen gefunden.",
                 conversation_id=conversation_id or 0,
                 sources=[],
             )
 
-        # 4. LLM-Prompt bauen (mit Original-Frage, nicht angereicherter Query)
+        # 4. LLM-Prompt bauen
         contexts = [
-            {
-                "content": r.content,
-                "document_name": r.document_name,
-                "page_number": r.page_number,
-            }
+            {"content": r.content, "document_name": r.document_name, "page_number": r.page_number}
             for r in results
         ]
         prompt = self.llm.build_rag_prompt(question, contexts)
 
         # 5. Antwort generieren
-        answer = await self.llm.generate(prompt)
+        result = await self.llm.generate(prompt, enable_thinking=enable_thinking)
+        answer = result["content"]
 
         # 6. Konversation speichern
         rag_chunks = [
@@ -125,33 +109,41 @@ class RAGPipeline:
             for r in results
         ]
         conv_id = await self._save_to_conversation(
-            user=user,
-            conversation_id=conversation_id,
-            question=question,
-            answer=answer,
-            results=results,
-            search_ids=search_ids,
-            enriched_query=enriched_query,
-            rag_chunks=rag_chunks,
+            user=user, conversation_id=conversation_id,
+            question=question, answer=answer, results=results,
+            search_ids=search_ids, enriched_query=enriched_query,
+            rag_chunks=rag_chunks, thinking=result.get("thinking"),
         )
 
-        # 7. Response zusammenbauen
         sources = [
             SourceChunk(
-                chunk_id=r.chunk_id,
-                document_name=r.document_name,
+                chunk_id=r.chunk_id, document_name=r.document_name,
                 collection_name=r.collection_name,
                 content_preview=r.content[:200] + "..." if len(r.content) > 200 else r.content,
-                page_number=r.page_number,
-                similarity_score=r.similarity_score,
+                page_number=r.page_number, similarity_score=r.similarity_score,
             )
             for r in results
         ]
 
         return ChatResponse(answer=answer, conversation_id=conv_id, sources=sources)
 
+    async def _free_chat(
+        self, question: str, user: User,
+        conversation_id: int | None, enable_thinking: bool,
+    ) -> ChatResponse:
+        """Direkte Konversation ohne RAG-Kontext."""
+        system = self.llm.config.free_chat_system_prompt or self.llm.config.system_prompt
+        result = await self.llm.generate(question, system_prompt=system, enable_thinking=enable_thinking)
+
+        conv_id = await self._save_to_conversation(
+            user=user, conversation_id=conversation_id,
+            question=question, answer=result["content"],
+            results=[], search_ids=[], thinking=result.get("thinking"),
+        )
+
+        return ChatResponse(answer=result["content"], conversation_id=conv_id, sources=[])
+
     async def _get_allowed_collection_ids(self, user: User) -> list[int]:
-        """Ermittelt alle Collection-IDs, auf die der Benutzer Zugriff hat."""
         if user.is_admin:
             from app.models.collection import Collection
             result = await self.db.execute(select(Collection.id))
@@ -166,7 +158,6 @@ class RAGPipeline:
         return [row[0] for row in result.fetchall()]
 
     async def _get_selected_collection_ids(self, user: User, allowed_ids: list[int]) -> list[int]:
-        """Ermittelt die vom Benutzer ausgewählten Collections (gefiltert auf erlaubte)."""
         result = await self.db.execute(
             select(UserSelectedCollection.collection_id)
             .where(UserSelectedCollection.user_id == user.id)
@@ -175,15 +166,15 @@ class RAGPipeline:
 
         if selected:
             return [cid for cid in selected if cid in allowed_ids]
-        return allowed_ids  # Fallback: alle erlaubten Collections
+        return allowed_ids
 
     async def _save_to_conversation(
         self, user: User, conversation_id: int | None,
         question: str, answer: str, results, search_ids: list[int],
         enriched_query: str | None = None,
         rag_chunks: list[dict] | None = None,
+        thinking: str | None = None,
     ) -> int:
-        """Speichert Frage und Antwort in der Konversation."""
         if conversation_id:
             result = await self.db.execute(
                 select(Conversation).where(
@@ -201,7 +192,6 @@ class RAGPipeline:
             self.db.add(conv)
             await self.db.flush()
 
-        # Frage speichern
         user_msg = Message(
             conversation_id=conv.id, role="user", content=question,
             used_collections=search_ids,
@@ -209,13 +199,14 @@ class RAGPipeline:
         )
         self.db.add(user_msg)
 
-        # Antwort speichern
         assistant_metadata = {}
         if rag_chunks:
             assistant_metadata["rag_chunks"] = rag_chunks
+        if thinking:
+            assistant_metadata["thinking"] = thinking
         assistant_msg = Message(
             conversation_id=conv.id, role="assistant", content=answer,
-            source_chunks=[r.chunk_id for r in results],
+            source_chunks=[r.chunk_id for r in results] if results else [],
             metadata_=assistant_metadata,
         )
         self.db.add(assistant_msg)

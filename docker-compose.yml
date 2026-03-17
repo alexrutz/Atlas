@@ -20,7 +20,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ../postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U atlas_user -d atlas"]
@@ -31,16 +31,24 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # Ollama - Lokaler LLM & Embedding Server
+  # llama.cpp - LLM Server (OpenAI-kompatible API)
   # ---------------------------------------------------------------------------
-  ollama:
-    image: ollama/ollama:latest
-    container_name: atlas-ollama
+  llama-cpp:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    container_name: atlas-llama-cpp
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "8080:8080"
     volumes:
-      - ollama_data:/root/.ollama
+      - ../models:/models:ro
+    command: >
+      --host 0.0.0.0
+      --port 8080
+      --model /models/Qwen3.5-35B-A3B-UD-IQ3_S.gguf
+      --ctx-size 8192
+      --n-gpu-layers 99
+      --chat-template chatml
+      --jinja
     deploy:
       resources:
         reservations:
@@ -49,7 +57,40 @@ services:
               count: all
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "ollama", "list"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
+  # llama.cpp - Embedding Server
+  # ---------------------------------------------------------------------------
+  llama-cpp-embed:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    container_name: atlas-llama-cpp-embed
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    volumes:
+      - ../models:/models:ro
+    command: >
+      --host 0.0.0.0
+      --port 8081
+      --model /models/pplx-embed-context-v1-0.6b-q8_0.gguf
+      --ctx-size 512
+      --n-gpu-layers 99
+      --embedding
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -75,10 +116,13 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       - upload_data:/tmp/atlas_uploads
       - ./logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
-      ollama:
+      llama-cpp:
+        condition: service_healthy
+      llama-cpp-embed:
         condition: service_healthy
     networks:
       - atlas-network
@@ -100,8 +144,6 @@ services:
       - atlas-network
 
 volumes:
-  postgres_data:
-  ollama_data:
   upload_data:
 
 networks:

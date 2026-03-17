@@ -201,5 +201,5 @@ class RetrievalService:
         # TODO: Implementierung mit Cross-Encoder Modell
         # Optionen:
         # - cross-encoder/ms-marco-MiniLM-L-6-v2 (via sentence-transformers)
-        # - LLM-basiertes Reranking über Ollama
+        # - LLM-basiertes Reranking über llama.cpp
         return sorted(results, key=lambda r: r.similarity_score, reverse=True)

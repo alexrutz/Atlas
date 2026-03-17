@@ -46,7 +46,7 @@ class DatabaseConfig(BaseModel):
 
 
 class VectorConfig(BaseModel):
-    dimensions: int = 1024
+    dimensions: int = 768
     index_type: str = "ivfflat"
     distance_metric: str = "cosine"
     ivfflat_lists: int = 100
@@ -56,25 +56,23 @@ class VectorConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    provider: str = "ollama"
-    base_url: str = "http://ollama:11434"
-    model: str = "llama3.1:8b"
+    base_url: str = "http://llama-cpp:8080"
+    model: str = "Qwen3.5-35B-A3B-UD-IQ3_S.gguf"
     temperature: float = 0.1
     top_p: float = 0.9
     top_k: int = 40
     max_tokens: int = 4096
     context_window: int = 8192
     repeat_penalty: float = 1.1
-    num_gpu: int = 1
-    num_threads: int = 8
     timeout: int = 120
     system_prompt: str = ""
+    enrichment_system_prompt: str = ""
+    free_chat_system_prompt: str = ""
 
 
 class EmbeddingConfig(BaseModel):
-    provider: str = "ollama"
-    base_url: str = "http://ollama:11434"
-    model: str = "nomic-embed-text"
+    base_url: str = "http://llama-cpp-embed:8081"
+    model: str = "pplx-embed-context-v1-0.6b-q8_0.gguf"
     batch_size: int = 32
     max_retries: int = 3
     timeout: int = 60
@@ -92,13 +90,6 @@ class ChunkingConfig(BaseModel):
 class QueryEnrichmentConfig(BaseModel):
     enabled: bool = True
     prompt_template: str = (
-        "Du erhältst eine Benutzeranfrage und Kontext-Beschreibungen "
-        "aus Firmendokumenten. Deine Aufgabe: Erweitere die Anfrage um relevante Fachbegriffe "
-        "oder Variablennamen aus dem Kontext, die für die Suche hilfreich sein könnten.\n\n"
-        "WICHTIG:\n"
-        "- Gib NUR die erweiterte Suchanfrage zurück, KEINE Erklärungen\n"
-        "- Behalte die ursprüngliche Frage bei und ergänze nur relevante Begriffe\n"
-        "- Wenn kein Kontext relevant ist, gib die ursprüngliche Frage unverändert zurück\n\n"
         "KONTEXT:\n{context}\n\n"
         "URSPRÜNGLICHE ANFRAGE: {query}\n\n"
         "ERWEITERTE SUCHANFRAGE:"

@@ -1,14 +1,14 @@
 /**
  * DocumentsPage - Dokumentenverwaltung mit Upload.
  *
- * Hier können Benutzer:
- * - Dokumente zu Collections hochladen
- * - Den Verarbeitungsstatus einsehen
+ * Layout:
+ * - Left: Collection-Liste mit globalem Kontext
+ * - Right: Upload + Kontext (50/50) + Dokumentenliste
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { collectionsApi, documentsApi } from '../services/api'
+import { collectionsApi, documentsApi, settingsApi } from '../services/api'
 import type { Collection, Document as DocType } from '../types'
 
 export default function DocumentsPage() {
@@ -17,6 +17,10 @@ export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocType[]>([])
   const [contextDraft, setContextDraft] = useState('')
   const [contextSaving, setContextSaving] = useState(false)
+  const [globalContext, setGlobalContext] = useState('')
+  const [globalContextDraft, setGlobalContextDraft] = useState('')
+  const [showGlobalContext, setShowGlobalContext] = useState(false)
+  const [globalContextSaving, setGlobalContextSaving] = useState(false)
 
   const loadCollections = useCallback(async () => {
     const data = await collectionsApi.list()
@@ -25,6 +29,10 @@ export default function DocumentsPage() {
 
   useEffect(() => {
     loadCollections()
+    settingsApi.getGlobalContext().then((d) => {
+      setGlobalContext(d.context_text)
+      setGlobalContextDraft(d.context_text)
+    }).catch(() => {})
   }, [loadCollections])
 
   useEffect(() => {
@@ -57,10 +65,20 @@ export default function DocumentsPage() {
     }
   }, [selectedCollection, contextDraft])
 
+  const handleSaveGlobalContext = useCallback(async () => {
+    setGlobalContextSaving(true)
+    try {
+      await settingsApi.updateGlobalContext(globalContextDraft)
+      setGlobalContext(globalContextDraft)
+    } finally {
+      setGlobalContextSaving(false)
+    }
+  }, [globalContextDraft])
+
   return (
     <div className="flex h-full">
       {/* Collection-Liste */}
-      <div className="w-64 border-r bg-white p-4 overflow-y-auto shrink-0">
+      <div className="w-64 border-r bg-white p-4 overflow-y-auto shrink-0 flex flex-col">
         <h3 className="font-semibold text-sm text-gray-500 uppercase mb-3">Collections</h3>
         {collections.length === 0 && (
           <p className="text-xs text-gray-400">Keine Collections vorhanden. Erstellen Sie eine im Admin-Panel.</p>
@@ -80,9 +98,39 @@ export default function DocumentsPage() {
             <div className="text-xs text-gray-400">{col.document_count} Dokumente</div>
           </button>
         ))}
+
+        {/* Globaler Kontext */}
+        <div className="mt-auto pt-4 border-t border-gray-200">
+          <button
+            onClick={() => { setShowGlobalContext(!showGlobalContext); setGlobalContextDraft(globalContext) }}
+            className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-atlas-600 uppercase w-full"
+          >
+            <span className={`inline-block transition-transform text-[10px] ${showGlobalContext ? 'rotate-90' : ''}`}>&#9654;</span>
+            Allgemeiner Kontext
+            {globalContext && <span className="ml-auto w-2 h-2 rounded-full bg-atlas-500 shrink-0" title="Kontext gesetzt" />}
+          </button>
+          {showGlobalContext && (
+            <div className="mt-2">
+              <textarea
+                value={globalContextDraft}
+                onChange={(e) => setGlobalContextDraft(e.target.value)}
+                placeholder="Allgemeiner Kontext für alle Collections..."
+                className="w-full text-xs p-2 border rounded resize-none focus:ring-1 focus:ring-atlas-500 outline-none"
+                rows={4}
+              />
+              <button
+                onClick={handleSaveGlobalContext}
+                disabled={globalContextSaving || globalContextDraft === globalContext}
+                className="mt-1 text-[10px] px-2 py-0.5 bg-atlas-600 text-white rounded hover:bg-atlas-700 disabled:opacity-50"
+              >
+                {globalContextSaving ? 'Speichern...' : 'Speichern'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Hauptbereich: Dokumente */}
+      {/* Hauptbereich */}
       <div className="flex-1 p-6 overflow-y-auto min-w-0">
         {!selectedCollection ? (
           <div className="text-center text-gray-400 mt-20">
@@ -95,11 +143,37 @@ export default function DocumentsPage() {
               <p className="text-gray-600 mb-6">{selectedCollection.description}</p>
             )}
 
-            {/* Upload-Bereich */}
-            <UploadSection
-              collectionId={selectedCollection.id}
-              onUploadComplete={() => { loadDocuments(); loadCollections() }}
-            />
+            {/* Upload + Kontext 50/50 */}
+            <div className="flex gap-4 mb-8">
+              {/* Upload-Bereich */}
+              <div className="flex-1">
+                <UploadSection
+                  collectionId={selectedCollection.id}
+                  onUploadComplete={() => { loadDocuments(); loadCollections() }}
+                />
+              </div>
+
+              {/* Collection-Kontext */}
+              <div className="flex-1 flex flex-col">
+                <h3 className="font-semibold mb-3 text-sm">Collection-Kontext</h3>
+                <p className="text-xs text-gray-400 mb-2">
+                  Variablen, Abkürzungen und Fachbegriffe für die Suchanreicherung.
+                </p>
+                <textarea
+                  value={contextDraft}
+                  onChange={(e) => setContextDraft(e.target.value)}
+                  placeholder="z.B. L1 = Kühlerlänge, B2 = Gehäusebreite..."
+                  className="flex-1 w-full text-sm p-3 border rounded-lg resize-none focus:ring-2 focus:ring-atlas-500 outline-none min-h-[120px]"
+                />
+                <button
+                  onClick={handleSaveContext}
+                  disabled={contextSaving || contextDraft === (selectedCollection.context_text || '')}
+                  className="mt-2 w-full px-3 py-2 text-sm bg-atlas-600 text-white rounded-lg hover:bg-atlas-700 disabled:opacity-50 transition"
+                >
+                  {contextSaving ? 'Speichern...' : 'Kontext speichern'}
+                </button>
+              </div>
+            </div>
 
             {/* Dokumentenliste */}
             <DocumentList
@@ -109,32 +183,6 @@ export default function DocumentsPage() {
           </div>
         )}
       </div>
-
-      {/* Kontext-Spalte */}
-      {selectedCollection && (
-        <div className="w-80 border-l bg-gray-50 p-4 flex flex-col shrink-0">
-          <h3 className="font-semibold text-sm text-gray-500 uppercase mb-2">
-            Collection-Kontext
-          </h3>
-          <p className="text-xs text-gray-400 mb-3">
-            Beschreibung von Variablen, Abkürzungen und Fachbegriffen in dieser Collection.
-            Wird zur Anreicherung der Suchanfragen verwendet.
-          </p>
-          <textarea
-            value={contextDraft}
-            onChange={(e) => setContextDraft(e.target.value)}
-            placeholder="z.B. L1 beschreibt die Kühlerlänge, B2 ist die Breite des Gehäuses, DNx = Nenndurchmesser..."
-            className="flex-1 w-full text-sm p-3 border rounded-lg resize-none focus:ring-2 focus:ring-atlas-500 outline-none bg-white"
-          />
-          <button
-            onClick={handleSaveContext}
-            disabled={contextSaving || contextDraft === (selectedCollection.context_text || '')}
-            className="mt-3 w-full px-3 py-2 text-sm bg-atlas-600 text-white rounded-lg hover:bg-atlas-700 disabled:opacity-50 transition"
-          >
-            {contextSaving ? 'Speichern...' : 'Kontext speichern'}
-          </button>
-        </div>
-      )}
     </div>
   )
 }
@@ -154,7 +202,6 @@ function UploadSection({ collectionId, onUploadComplete }: {
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return
-
     setUploadError('')
     setUploadSuccess('')
 
@@ -163,11 +210,10 @@ function UploadSection({ collectionId, onUploadComplete }: {
       setUploadProgress(0)
       try {
         await documentsApi.upload(
-          collectionId,
-          file,
+          collectionId, file,
           (percent) => setUploadProgress(percent),
         )
-        setUploadSuccess(`"${file.name}" erfolgreich hochgeladen. Verarbeitung läuft...`)
+        setUploadSuccess(`"${file.name}" erfolgreich hochgeladen.`)
         onUploadComplete()
       } catch (err: unknown) {
         const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -198,19 +244,15 @@ function UploadSection({ collectionId, onUploadComplete }: {
   })
 
   return (
-    <section className="mb-8">
-      <h3 className="font-semibold mb-3">Dokument hochladen</h3>
+    <section>
+      <h3 className="font-semibold mb-3 text-sm">Dokument hochladen</h3>
 
-      {uploadError && (
-        <div className="bg-red-50 text-red-600 p-3 rounded text-sm mb-3">{uploadError}</div>
-      )}
-      {uploadSuccess && (
-        <div className="bg-green-50 text-green-600 p-3 rounded text-sm mb-3">{uploadSuccess}</div>
-      )}
+      {uploadError && <div className="bg-red-50 text-red-600 p-2 rounded text-xs mb-2">{uploadError}</div>}
+      {uploadSuccess && <div className="bg-green-50 text-green-600 p-2 rounded text-xs mb-2">{uploadSuccess}</div>}
 
       <div
         {...getRootProps()}
-        className={`border-2 border-dashed rounded-lg p-6 text-center transition cursor-pointer ${
+        className={`border-2 border-dashed rounded-lg p-6 text-center transition cursor-pointer min-h-[120px] flex items-center justify-center ${
           isDragActive
             ? 'border-atlas-500 bg-atlas-50'
             : uploading
@@ -220,26 +262,19 @@ function UploadSection({ collectionId, onUploadComplete }: {
       >
         <input {...getInputProps()} />
         {uploading ? (
-          <div>
+          <div className="w-full">
             <p className="text-gray-600 text-sm mb-2">Hochladen... {uploadProgress}%</p>
             <div className="w-full bg-gray-200 rounded-full h-2">
-              <div
-                className="bg-atlas-600 h-2 rounded-full transition-all"
-                style={{ width: `${uploadProgress}%` }}
-              />
+              <div className="bg-atlas-600 h-2 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} />
             </div>
           </div>
         ) : isDragActive ? (
           <p className="text-atlas-600 font-medium">Datei hier ablegen...</p>
         ) : (
-          <>
-            <p className="text-gray-500">
-              Datei hierher ziehen oder klicken zum Auswählen
-            </p>
-            <p className="text-xs text-gray-400 mt-1">
-              PDF, DOCX, XLSX, PPTX, TXT, CSV, HTML (max. 100 MB)
-            </p>
-          </>
+          <div>
+            <p className="text-gray-500 text-sm">Datei hierher ziehen oder klicken</p>
+            <p className="text-xs text-gray-400 mt-1">PDF, DOCX, XLSX, PPTX, TXT, CSV, HTML (max. 100 MB)</p>
+          </div>
         )}
       </div>
     </section>
@@ -256,23 +291,15 @@ function DocumentList({ documents, onRefresh }: {
 }) {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Poll for status updates when documents are processing
   useEffect(() => {
     const hasProcessing = documents.some(
       (d) => d.processing_status === 'pending' || d.processing_status === 'processing'
     )
-
     if (hasProcessing) {
-      pollingRef.current = setInterval(() => {
-        onRefresh()
-      }, 3000)
+      pollingRef.current = setInterval(() => { onRefresh() }, 3000)
     }
-
     return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current)
-        pollingRef.current = null
-      }
+      if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
     }
   }, [documents, onRefresh])
 
@@ -300,7 +327,7 @@ function DocumentList({ documents, onRefresh }: {
   }
 
   return (
-    <section className="mb-8">
+    <section>
       <h3 className="font-semibold mb-3">Dokumente ({documents.length})</h3>
       {documents.length === 0 && (
         <p className="text-sm text-gray-400">Noch keine Dokumente hochgeladen.</p>
@@ -327,10 +354,7 @@ function DocumentList({ documents, onRefresh }: {
                 </div>
               )}
             </div>
-            <button
-              onClick={() => handleDelete(doc)}
-              className="text-red-500 hover:text-red-700 text-sm"
-            >
+            <button onClick={() => handleDelete(doc)} className="text-red-500 hover:text-red-700 text-sm">
               Löschen
             </button>
           </div>

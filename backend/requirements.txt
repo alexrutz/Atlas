@@ -41,9 +41,12 @@ Pillow==11.1.0
 tiktoken==0.8.0
 numpy==2.2.1
 
-# HTTP Client (für Ollama API)
+# HTTP Client
 httpx==0.28.1
 aiohttp==3.11.11
+
+# Docker
+docker==7.1.0
 
 # Logging
 python-json-logger==3.2.1
@@ -51,4 +54,3 @@ python-json-logger==3.2.1
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.25.0
-httpx==0.28.1
