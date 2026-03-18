@@ -55,19 +55,35 @@ class VectorConfig(BaseModel):
     probes: int = 10
 
 
+class SamplingConfig(BaseModel):
+    temperature: float = 0.7
+    top_p: float = 0.8
+    top_k: int = 20
+    min_p: float = 0.0
+    presence_penalty: float = 1.5
+    repetition_penalty: float = 1.0
+
+
+class ThinkingSamplingConfig(BaseModel):
+    temperature: float = 1.0
+    top_p: float = 0.95
+    top_k: int = 20
+    min_p: float = 0.0
+    presence_penalty: float = 1.5
+    repetition_penalty: float = 1.0
+
+
 class LLMConfig(BaseModel):
     base_url: str = "http://llama-cpp:8080"
     model: str = "Qwen3.5-35B-A3B-UD-IQ3_S.gguf"
-    temperature: float = 0.1
-    top_p: float = 0.9
-    top_k: int = 40
     max_tokens: int = 65536
     context_window: int = 65536
-    repeat_penalty: float = 1.1
     timeout: int = 120
     system_prompt: str = ""
     enrichment_system_prompt: str = ""
     free_chat_system_prompt: str = ""
+    sampling: SamplingConfig = SamplingConfig()
+    thinking_sampling: ThinkingSamplingConfig = ThinkingSamplingConfig()
 
 
 class EmbeddingConfig(BaseModel):

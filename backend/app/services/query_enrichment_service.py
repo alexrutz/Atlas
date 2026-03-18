@@ -31,6 +31,7 @@ class QueryEnrichmentService:
         self,
         query: str,
         collection_ids: list[int],
+        enable_thinking: bool = False,
     ) -> str:
         """
         Reichert eine Suchanfrage mit Kontextinformationen an.
@@ -45,7 +46,7 @@ class QueryEnrichmentService:
             logger.info("Kein Kontext verfügbar - enriched_query = original_query")
             return query
 
-        enriched = await self._generate_enriched_query(query, context)
+        enriched = await self._generate_enriched_query(query, context, enable_thinking)
         return enriched
 
     async def _load_context(self, collection_ids: list[int]) -> str:
@@ -76,7 +77,7 @@ class QueryEnrichmentService:
 
         return "\n\n".join(parts)
 
-    async def _generate_enriched_query(self, query: str, context: str) -> str:
+    async def _generate_enriched_query(self, query: str, context: str, enable_thinking: bool = False) -> str:
         """Lässt das LLM die Suchanfrage mit dem geladenen Kontext anreichern."""
         prompt = self.config.prompt_template.format(
             context=context,
@@ -84,7 +85,7 @@ class QueryEnrichmentService:
         )
 
         try:
-            enriched_query = await self.llm.generate_enrichment(prompt)
+            enriched_query = await self.llm.generate_enrichment(prompt, enable_thinking=enable_thinking)
 
             if enriched_query:
                 logger.info(

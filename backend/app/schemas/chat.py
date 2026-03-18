@@ -10,6 +10,7 @@ class ChatRequest(BaseModel):
     conversation_id: int | None = None
     collection_ids: list[int] | None = None
     enable_thinking: bool = False
+    enable_enrichment_thinking: bool = False
     rag_mode: bool = True
 
 

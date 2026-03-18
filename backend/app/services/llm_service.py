@@ -27,6 +27,18 @@ class LLMService:
         self.config = settings.llm
         self.base_url = self.config.base_url
 
+    def _sampling_params(self, enable_thinking: bool) -> dict:
+        """Return sampling parameters based on thinking mode."""
+        s = self.config.thinking_sampling if enable_thinking else self.config.sampling
+        return {
+            "temperature": s.temperature,
+            "top_p": s.top_p,
+            "top_k": s.top_k,
+            "min_p": s.min_p,
+            "presence_penalty": s.presence_penalty,
+            "repetition_penalty": s.repetition_penalty,
+        }
+
     async def generate(
         self,
         prompt: str,
@@ -47,8 +59,7 @@ class LLMService:
 
         body: dict = {
             "messages": messages,
-            "temperature": self.config.temperature,
-            "top_p": self.config.top_p,
+            **self._sampling_params(enable_thinking),
             "max_tokens": self.config.max_tokens,
             "stream": False,
             "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
@@ -115,8 +126,7 @@ class LLMService:
 
         body: dict = {
             "messages": messages,
-            "temperature": self.config.temperature,
-            "top_p": self.config.top_p,
+            **self._sampling_params(enable_thinking),
             "max_tokens": self.config.max_tokens,
             "stream": True,
             "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
@@ -157,7 +167,7 @@ class LLMService:
                     except (json.JSONDecodeError, KeyError, IndexError):
                         continue
 
-    async def generate_enrichment(self, prompt: str) -> str:
+    async def generate_enrichment(self, prompt: str, enable_thinking: bool = False) -> str:
         """Generate enriched query using the enrichment system prompt."""
         system = self.config.enrichment_system_prompt or self.config.system_prompt
         messages = [
@@ -165,12 +175,16 @@ class LLMService:
             {"role": "user", "content": prompt},
         ]
 
+        sampling = self._sampling_params(enable_thinking)
+        # Override temperature to 0.0 for enrichment (deterministic)
+        sampling["temperature"] = 0.0
+
         body: dict = {
             "messages": messages,
-            "temperature": 0.0,
+            **sampling,
             "max_tokens": 256,
             "stream": False,
-            "chat_template_kwargs": {"enable_thinking": False},
+            "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
         }
 
         # Diagnostic: log enrichment input
