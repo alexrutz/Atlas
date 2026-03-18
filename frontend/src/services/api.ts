@@ -165,12 +165,14 @@ export const chatApi = {
   deleteConversation: (id: number) => api.delete(`/conversations/${id}`),
   getMessages: (conversationId: number) =>
     api.get<Message[]>(`/conversations/${conversationId}/messages`).then(r => r.data),
-  ask: (question: string, conversationId?: number, collectionIds?: number[], enableThinking?: boolean, ragMode?: boolean) =>
+  ask: (question: string, conversationId?: number, collectionIds?: number[], enableThinking?: boolean, enableEnrichmentThinking?: boolean, ragMode?: boolean) =>
     api.post<ChatResponse>('/chat', {
       question, conversation_id: conversationId, collection_ids: collectionIds,
-      enable_thinking: enableThinking ?? false, rag_mode: ragMode ?? true,
+      enable_thinking: enableThinking ?? false,
+      enable_enrichment_thinking: enableEnrichmentThinking ?? false,
+      rag_mode: ragMode ?? true,
     }).then(r => r.data),
-  askStream: (question: string, conversationId?: number, collectionIds?: number[], enableThinking?: boolean, ragMode?: boolean) => {
+  askStream: (question: string, conversationId?: number, collectionIds?: number[], enableThinking?: boolean, enableEnrichmentThinking?: boolean, ragMode?: boolean) => {
     const token = localStorage.getItem('atlas_token')
     return fetch('/api/chat/stream', {
       method: 'POST',
@@ -180,7 +182,9 @@ export const chatApi = {
       },
       body: JSON.stringify({
         question, conversation_id: conversationId, collection_ids: collectionIds,
-        enable_thinking: enableThinking ?? false, rag_mode: ragMode ?? true,
+        enable_thinking: enableThinking ?? false,
+        enable_enrichment_thinking: enableEnrichmentThinking ?? false,
+        rag_mode: ragMode ?? true,
       }),
     })
   },

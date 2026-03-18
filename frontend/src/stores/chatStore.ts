@@ -17,6 +17,7 @@ interface ChatState {
   streamingThinking: string
   globalContext: string
   enableThinking: boolean
+  enableEnrichmentThinking: boolean
   ragMode: boolean
 
   loadConversations: () => Promise<void>
@@ -33,6 +34,7 @@ interface ChatState {
   updateGlobalContext: (text: string) => Promise<void>
   updateCollectionContext: (collectionId: number, text: string) => Promise<void>
   setEnableThinking: (enabled: boolean) => void
+  setEnableEnrichmentThinking: (enabled: boolean) => void
   setRagMode: (enabled: boolean) => void
 }
 
@@ -47,6 +49,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingThinking: '',
   globalContext: '',
   enableThinking: false,
+  enableEnrichmentThinking: false,
   ragMode: true,
 
   loadConversations: async () => {
@@ -83,12 +86,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (question) => {
-    const { currentConversationId, selectedCollectionIds, enableThinking, ragMode } = get()
+    const { currentConversationId, selectedCollectionIds, enableThinking, enableEnrichmentThinking, ragMode } = get()
     set({ isLoading: true })
     try {
       const response = await chatApi.ask(
         question, currentConversationId ?? undefined, selectedCollectionIds,
-        enableThinking, ragMode,
+        enableThinking, enableEnrichmentThinking, ragMode,
       )
 
       const userMsg: Message = {
@@ -113,7 +116,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessageStream: async (question) => {
-    const { currentConversationId, selectedCollectionIds, enableThinking, ragMode } = get()
+    const { currentConversationId, selectedCollectionIds, enableThinking, enableEnrichmentThinking, ragMode } = get()
 
     const userMsg: Message = {
       id: Date.now(), role: 'user', content: question, sources: [],
@@ -130,7 +133,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const response = await chatApi.askStream(
         question, currentConversationId ?? undefined, selectedCollectionIds,
-        enableThinking, ragMode,
+        enableThinking, enableEnrichmentThinking, ragMode,
       )
 
       if (!response.ok) {
@@ -278,6 +281,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setEnableThinking: (enabled: boolean) => {
     set({ enableThinking: enabled })
+  },
+
+  setEnableEnrichmentThinking: (enabled: boolean) => {
+    set({ enableEnrichmentThinking: enabled })
   },
 
   setRagMode: (enabled: boolean) => {

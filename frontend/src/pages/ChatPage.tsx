@@ -196,11 +196,11 @@ export default function ChatPage() {
   const {
     conversations, currentConversationId, messages, collections,
     selectedCollectionIds, isLoading, streamingContent,
-    enableThinking, ragMode,
+    enableThinking, enableEnrichmentThinking, ragMode,
     loadConversations, selectConversation,
     deleteConversation, loadCollections, toggleCollection,
     sendMessageStream, clearChat,
-    setEnableThinking, setRagMode,
+    setEnableThinking, setEnableEnrichmentThinking, setRagMode,
   } = useChatStore()
 
   const [input, setInput] = useState('')
@@ -421,16 +421,29 @@ export default function ChatPage() {
               >
                 Senden
               </button>
-              {/* Thinking Toggle */}
-              <label className="flex items-center gap-1 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={enableThinking}
-                  onChange={(e) => setEnableThinking(e.target.checked)}
-                  className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 w-3 h-3"
-                />
-                <span className="text-[10px] text-gray-500">Thinking</span>
-              </label>
+              {/* Thinking Toggles */}
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableThinking}
+                    onChange={(e) => setEnableThinking(e.target.checked)}
+                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 w-3 h-3"
+                  />
+                  <span className="text-[10px] text-gray-500">RAG Thinking</span>
+                </label>
+                {ragMode && (
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enableEnrichmentThinking}
+                      onChange={(e) => setEnableEnrichmentThinking(e.target.checked)}
+                      className="rounded border-gray-300 text-cyan-600 focus:ring-cyan-500 w-3 h-3"
+                    />
+                    <span className="text-[10px] text-gray-500">Enrichment Thinking</span>
+                  </label>
+                )}
+              </div>
             </div>
           </div>
         </div>
