@@ -15,6 +15,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Container names defined in docker-compose.yml
+COMPOSE_CONTAINER_NAMES = {
+    "atlas-postgres",
+    "atlas-llama-cpp",
+    "atlas-llama-cpp-embed",
+    "atlas-backend",
+    "atlas-llm-diagnostic",
+    "atlas-frontend",
+}
+
 
 def get_docker_client():
     """Docker-Client erstellen."""
@@ -80,6 +90,8 @@ async def list_containers(current_user: User = Depends(get_current_user)):
 
     containers = []
     for c in client.containers.list(all=True):
+        if c.name not in COMPOSE_CONTAINER_NAMES:
+            continue
         ports = {}
         if c.attrs.get("NetworkSettings", {}).get("Ports"):
             for port, bindings in c.attrs["NetworkSettings"]["Ports"].items():
@@ -133,8 +145,16 @@ async def list_images(current_user: User = Depends(get_current_user)):
     require_admin(current_user)
     client = get_docker_client()
 
+    # Collect image IDs used by compose containers
+    compose_image_ids = set()
+    for c in client.containers.list(all=True):
+        if c.name in COMPOSE_CONTAINER_NAMES:
+            compose_image_ids.add(c.image.id)
+
     images = []
     for img in client.images.list():
+        if img.id not in compose_image_ids:
+            continue
         images.append(ImageInfo(
             id=img.short_id.replace("sha256:", ""),
             tags=img.tags or [],
@@ -205,6 +225,10 @@ async def list_volumes(current_user: User = Depends(get_current_user)):
 
     volumes = []
     for vol in client.volumes.list():
+        # Only show volumes belonging to the Atlas compose project
+        labels = vol.attrs.get("Labels") or {}
+        if "atlas" not in vol.name.lower() and labels.get("com.docker.compose.project", "") != "atlas":
+            continue
         volumes.append(VolumeInfo(
             name=vol.name,
             driver=vol.attrs.get("Driver", "local"),

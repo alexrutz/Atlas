@@ -42,6 +42,7 @@ class RAGPipeline:
         collection_ids: list[int] | None = None,
         enable_thinking: bool = False,
         enable_enrichment_thinking: bool = False,
+        enable_enrichment: bool = True,
         rag_mode: bool = True,
     ) -> ChatResponse:
         """Verarbeitet eine Benutzerfrage."""
@@ -70,10 +71,13 @@ class RAGPipeline:
             )
 
         # 2. Query-Anreicherung
-        enriched_query = await self.query_enrichment.enrich_query(
-            query=question, collection_ids=search_ids,
-            enable_thinking=enable_enrichment_thinking,
-        )
+        if enable_enrichment:
+            enriched_query = await self.query_enrichment.enrich_query(
+                query=question, collection_ids=search_ids,
+                enable_thinking=enable_enrichment_thinking,
+            )
+        else:
+            enriched_query = question
 
         # 3. Retrieval
         results = await self.retrieval.search(query=enriched_query, collection_ids=search_ids)

@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.config import settings, get_settings
 from app.models.user import User
 from app.models.system_setting import SystemSetting
 
@@ -19,6 +20,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 GLOBAL_CONTEXT_KEY = "global_context"
+PROMPT_KEYS = {
+    "system_prompt": "system_prompt",
+    "enrichment_system_prompt": "enrichment_system_prompt",
+    "free_chat_system_prompt": "free_chat_system_prompt",
+}
 CONFIG_PATH = Path("config.yaml")
 
 
@@ -81,3 +87,74 @@ async def get_model_config(
     except Exception as e:
         logger.error(f"Fehler beim Lesen der Konfiguration: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# --- Prompts Management ---
+
+class PromptsResponse(BaseModel):
+    system_prompt: str
+    enrichment_system_prompt: str
+    free_chat_system_prompt: str
+
+
+class PromptsUpdate(BaseModel):
+    system_prompt: str
+    enrichment_system_prompt: str
+    free_chat_system_prompt: str
+
+
+def _require_admin(user: User):
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
+
+
+@router.get("/prompts", response_model=PromptsResponse)
+async def get_prompts(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current prompts. Returns DB overrides if they exist, otherwise config.yaml defaults."""
+    _require_admin(current_user)
+    prompts = {}
+    for key in PROMPT_KEYS:
+        result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key == f"prompt_{key}")
+        )
+        setting = result.scalar_one_or_none()
+        if setting:
+            prompts[key] = setting.value
+        else:
+            prompts[key] = getattr(settings.llm, key, "")
+    return PromptsResponse(**prompts)
+
+
+@router.put("/prompts", response_model=PromptsResponse)
+async def update_prompts(
+    data: PromptsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update prompts. Saves to DB and updates the running config in-memory."""
+    _require_admin(current_user)
+
+    updates = {
+        "system_prompt": data.system_prompt,
+        "enrichment_system_prompt": data.enrichment_system_prompt,
+        "free_chat_system_prompt": data.free_chat_system_prompt,
+    }
+
+    for key, value in updates.items():
+        db_key = f"prompt_{key}"
+        result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key == db_key)
+        )
+        setting = result.scalar_one_or_none()
+        if setting:
+            setting.value = value
+        else:
+            db.add(SystemSetting(key=db_key, value=value))
+
+        # Update in-memory config so changes take effect immediately
+        setattr(settings.llm, key, value)
+
+    return PromptsResponse(**updates)

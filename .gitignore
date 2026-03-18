@@ -1,5 +1,5 @@
 # Umgebungsvariablen
-.env
+.env.local
 
 # Python
 __pycache__/

@@ -79,9 +79,9 @@ services:
       --host 0.0.0.0
       --port 8081
       --model /models/pplx-embed-context-v1-0.6b-q8_0.gguf
-      --ctx-size 8192
-      --batch-size 8192
-      --ubatch-size 8192
+      --ctx-size 32768
+      --batch-size 32768
+      --ubatch-size 32768
       --n-gpu-layers 99
       --embedding
     deploy:

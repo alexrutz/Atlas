@@ -149,6 +149,12 @@ export interface ModelConfig {
   embedding_model: string
 }
 
+export interface PromptsConfig {
+  system_prompt: string
+  enrichment_system_prompt: string
+  free_chat_system_prompt: string
+}
+
 export const settingsApi = {
   getGlobalContext: () =>
     api.get<{ context_text: string }>('/settings/global-context').then(r => r.data),
@@ -156,6 +162,10 @@ export const settingsApi = {
     api.put<{ context_text: string }>('/settings/global-context', { context_text: contextText }).then(r => r.data),
   getModelConfig: () =>
     api.get<ModelConfig>('/settings/models').then(r => r.data),
+  getPrompts: () =>
+    api.get<PromptsConfig>('/settings/prompts').then(r => r.data),
+  updatePrompts: (data: PromptsConfig) =>
+    api.put<PromptsConfig>('/settings/prompts', data).then(r => r.data),
 }
 
 // --- Chat ---
@@ -165,14 +175,15 @@ export const chatApi = {
   deleteConversation: (id: number) => api.delete(`/conversations/${id}`),
   getMessages: (conversationId: number) =>
     api.get<Message[]>(`/conversations/${conversationId}/messages`).then(r => r.data),
-  ask: (question: string, conversationId?: number, collectionIds?: number[], enableThinking?: boolean, enableEnrichmentThinking?: boolean, ragMode?: boolean) =>
+  ask: (question: string, conversationId?: number, collectionIds?: number[], enableThinking?: boolean, enableEnrichmentThinking?: boolean, enableEnrichment?: boolean, ragMode?: boolean) =>
     api.post<ChatResponse>('/chat', {
       question, conversation_id: conversationId, collection_ids: collectionIds,
       enable_thinking: enableThinking ?? false,
       enable_enrichment_thinking: enableEnrichmentThinking ?? false,
+      enable_enrichment: enableEnrichment ?? true,
       rag_mode: ragMode ?? true,
     }).then(r => r.data),
-  askStream: (question: string, conversationId?: number, collectionIds?: number[], enableThinking?: boolean, enableEnrichmentThinking?: boolean, ragMode?: boolean) => {
+  askStream: (question: string, conversationId?: number, collectionIds?: number[], enableThinking?: boolean, enableEnrichmentThinking?: boolean, enableEnrichment?: boolean, ragMode?: boolean) => {
     const token = localStorage.getItem('atlas_token')
     return fetch('/api/chat/stream', {
       method: 'POST',
@@ -184,6 +195,7 @@ export const chatApi = {
         question, conversation_id: conversationId, collection_ids: collectionIds,
         enable_thinking: enableThinking ?? false,
         enable_enrichment_thinking: enableEnrichmentThinking ?? false,
+        enable_enrichment: enableEnrichment ?? true,
         rag_mode: ragMode ?? true,
       }),
     })
