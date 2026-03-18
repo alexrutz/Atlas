@@ -11,6 +11,7 @@ class ChatRequest(BaseModel):
     collection_ids: list[int] | None = None
     enable_thinking: bool = False
     enable_enrichment_thinking: bool = False
+    enable_enrichment: bool = True
     rag_mode: bool = True
 
 

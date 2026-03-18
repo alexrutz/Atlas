@@ -25,6 +25,22 @@ logger = logging.getLogger(__name__)
 setup_diagnostic_logging()
 
 
+async def load_prompt_overrides():
+    """Load prompt overrides from the database into the in-memory config."""
+    from app.models.system_setting import SystemSetting
+
+    prompt_keys = ["system_prompt", "enrichment_system_prompt", "free_chat_system_prompt"]
+    async with async_session() as session:
+        for key in prompt_keys:
+            result = await session.execute(
+                select(SystemSetting).where(SystemSetting.key == f"prompt_{key}")
+            )
+            setting = result.scalar_one_or_none()
+            if setting and setting.value:
+                setattr(settings.llm, key, setting.value)
+                logger.info(f"Loaded prompt override for '{key}' from database.")
+
+
 async def seed_admin_user():
     """Erstellt den Standard-Admin-Benutzer, falls keiner existiert."""
     from app.models.user import User
@@ -71,6 +87,9 @@ async def lifespan(app: FastAPI):
 
     # Admin-Benutzer anlegen, falls keiner existiert
     await seed_admin_user()
+
+    # Load prompt overrides from DB
+    await load_prompt_overrides()
 
     logger.info("Atlas RAG System bereit.")
     yield

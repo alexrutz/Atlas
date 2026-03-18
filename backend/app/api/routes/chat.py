@@ -165,6 +165,7 @@ async def ask_question(
             collection_ids=request.collection_ids,
             enable_thinking=request.enable_thinking,
             enable_enrichment_thinking=request.enable_enrichment_thinking,
+            enable_enrichment=request.enable_enrichment,
             rag_mode=request.rag_mode,
         )
         return result
@@ -263,10 +264,13 @@ async def ask_question_stream(
             return StreamingResponse(no_collections(), media_type="text/event-stream")
 
         # Query enrichment
-        enriched_query = await pipeline.query_enrichment.enrich_query(
-            query=request.question, collection_ids=search_ids,
-            enable_thinking=request.enable_enrichment_thinking,
-        )
+        if request.enable_enrichment:
+            enriched_query = await pipeline.query_enrichment.enrich_query(
+                query=request.question, collection_ids=search_ids,
+                enable_thinking=request.enable_enrichment_thinking,
+            )
+        else:
+            enriched_query = request.question
 
         results = await pipeline.retrieval.search(query=enriched_query, collection_ids=search_ids)
 

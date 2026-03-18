@@ -9,13 +9,14 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { usersApi, groupsApi, collectionsApi, dockerApi } from '../services/api'
+import { usersApi, groupsApi, collectionsApi, dockerApi, settingsApi } from '../services/api'
+import type { PromptsConfig } from '../services/api'
 import type {
   UserDetail, Group, Collection, AccessInfo,
   DockerContainer, DockerImage, DockerVolume, BulkActionResult,
 } from '../types'
 
-type Tab = 'users' | 'groups' | 'collections' | 'docker'
+type Tab = 'users' | 'groups' | 'collections' | 'prompts' | 'docker'
 
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -24,6 +25,7 @@ export default function AdminPage() {
     { key: 'users', label: 'Benutzer' },
     { key: 'groups', label: 'Gruppen' },
     { key: 'collections', label: 'Collections' },
+    { key: 'prompts', label: 'Prompts' },
     { key: 'docker', label: 'Docker & System' },
   ]
 
@@ -51,8 +53,113 @@ export default function AdminPage() {
         {activeTab === 'users' && <UsersTab />}
         {activeTab === 'groups' && <GroupsTab />}
         {activeTab === 'collections' && <CollectionsTab />}
+        {activeTab === 'prompts' && <PromptsTab />}
         {activeTab === 'docker' && <DockerTab />}
       </div>
+    </div>
+  )
+}
+
+// =============================================================================
+// Prompts Tab
+// =============================================================================
+
+function PromptsTab() {
+  const [prompts, setPrompts] = useState<PromptsConfig>({
+    system_prompt: '',
+    enrichment_system_prompt: '',
+    free_chat_system_prompt: '',
+  })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  const loadPrompts = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError('')
+      const data = await settingsApi.getPrompts()
+      setPrompts(data)
+    } catch {
+      setError('Prompts konnten nicht geladen werden')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadPrompts()
+  }, [loadPrompts])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError('')
+    setSuccess('')
+    try {
+      await settingsApi.updatePrompts(prompts)
+      setSuccess('Prompts gespeichert und sofort aktiv.')
+      setTimeout(() => setSuccess(''), 3000)
+    } catch {
+      setError('Fehler beim Speichern der Prompts')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) return <div className="text-gray-500">Laden...</div>
+
+  const fields: { key: keyof PromptsConfig; label: string; description: string }[] = [
+    {
+      key: 'system_prompt',
+      label: 'RAG System Prompt',
+      description: 'Used when answering questions with document context (RAG mode).',
+    },
+    {
+      key: 'enrichment_system_prompt',
+      label: 'Query Enrichment Prompt',
+      description: 'Used to rephrase user queries with context before retrieval.',
+    },
+    {
+      key: 'free_chat_system_prompt',
+      label: 'Free Chat Prompt',
+      description: 'Used for direct conversation without document context.',
+    },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">System Prompts</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Edit the prompts used by the LLM. Changes take effect immediately in the running system.
+          </p>
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-4 py-2 bg-atlas-600 text-white rounded hover:bg-atlas-700 disabled:opacity-50 text-sm"
+        >
+          {saving ? 'Speichern...' : 'Alle speichern'}
+        </button>
+      </div>
+
+      {error && <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>}
+      {success && <div className="bg-green-50 text-green-600 p-3 rounded text-sm">{success}</div>}
+
+      {fields.map(({ key, label, description }) => (
+        <div key={key} className="bg-white rounded-lg shadow p-4">
+          <label className="block text-sm font-semibold text-gray-700 mb-1">{label}</label>
+          <p className="text-xs text-gray-400 mb-2">{description}</p>
+          <textarea
+            value={prompts[key]}
+            onChange={(e) => setPrompts({ ...prompts, [key]: e.target.value })}
+            rows={6}
+            className="w-full p-3 border rounded text-sm font-mono focus:ring-2 focus:ring-atlas-500 outline-none resize-y"
+          />
+        </div>
+      ))}
     </div>
   )
 }
