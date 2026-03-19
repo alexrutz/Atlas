@@ -23,6 +23,7 @@ class ChatResponse(BaseModel):
 
 class SourceChunk(BaseModel):
     chunk_id: int
+    document_id: int | None = None
     document_name: str
     collection_name: str
     content_preview: str
@@ -40,6 +41,7 @@ class ConversationResponse(BaseModel):
 
 
 class RagChunk(BaseModel):
+    document_id: int | None = None
     document_name: str
     collection_name: str
     page_number: int | None

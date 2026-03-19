@@ -102,6 +102,36 @@ def _parse_pdf(file_path: str) -> ParsedDocument:
     )
 
 
+def _clean_ocr_text(text: str) -> str:
+    """Bereinigt OCR-Text von typischen Artefakten.
+
+    Entfernt:
+    - Zeilen die überwiegend aus Sonderzeichen bestehen
+    - Übermäßige Leerzeichen und Steuerzeichen
+    - Sehr kurze Zeilen die wahrscheinlich Rauschen sind
+    """
+    import re
+
+    lines = text.split("\n")
+    cleaned = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # Anteil alphanumerischer Zeichen berechnen
+        alnum_count = sum(1 for c in line if c.isalnum())
+        if len(line) > 0 and alnum_count / len(line) < 0.3:
+            # Zeile besteht zu >70% aus Sonderzeichen → Rauschen
+            continue
+        if len(line) < 3:
+            continue
+        # Mehrfache Leerzeichen zusammenfassen
+        line = re.sub(r" {2,}", " ", line)
+        cleaned.append(line)
+
+    return "\n".join(cleaned)
+
+
 def _ocr_pdf(file_path: str, ocr_language: str = "deu+eng") -> tuple[list[ParsedSection], list[str]]:
     """Führt OCR auf allen Seiten eines PDFs durch."""
     try:
@@ -117,14 +147,17 @@ def _ocr_pdf(file_path: str, ocr_language: str = "deu+eng") -> tuple[list[Parsed
     try:
         images = convert_from_path(file_path, dpi=300)
         for i, image in enumerate(images):
-            text = pytesseract.image_to_string(image, lang=ocr_language)
-            if text.strip():
+            raw_text = pytesseract.image_to_string(image, lang=ocr_language)
+            text = _clean_ocr_text(raw_text)
+            if text.strip() and len(text.strip()) >= 20:
                 sections.append(ParsedSection(
                     header=None,
                     content=text.strip(),
                     page_number=i + 1,
                 ))
                 full_text.append(text.strip())
+            elif text.strip():
+                logger.debug(f"OCR-Seite {i+1} übersprungen (zu wenig brauchbarer Text: {len(text.strip())} Zeichen)")
     except Exception as e:
         logger.error(f"OCR-Fehler: {e}")
 

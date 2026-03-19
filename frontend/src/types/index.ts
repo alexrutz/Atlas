@@ -84,6 +84,7 @@ export interface Conversation {
 }
 
 export interface RagChunk {
+  document_id?: number | null
   document_name: string
   collection_name: string
   page_number: number | null
@@ -105,6 +106,7 @@ export interface Message {
 
 export interface SourceChunk {
   chunk_id: number
+  document_id?: number | null
   document_name: string
   collection_name: string
   content_preview: string

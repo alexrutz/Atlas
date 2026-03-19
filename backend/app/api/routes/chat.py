@@ -124,23 +124,40 @@ async def get_conversation_messages(
     response = []
     for msg in messages:
         sources = []
-        if msg.source_chunks:
+        # Reconstruct sources from rag_chunks metadata (has scores + document_id)
+        stored_rag_chunks = msg.metadata_.get("rag_chunks", []) if msg.metadata_ else []
+        if stored_rag_chunks:
+            for i, rc in enumerate(stored_rag_chunks):
+                content = rc.get("content", "")
+                sources.append(SourceChunk(
+                    chunk_id=msg.source_chunks[i] if msg.source_chunks and i < len(msg.source_chunks) else 0,
+                    document_id=rc.get("document_id"),
+                    document_name=rc.get("document_name", ""),
+                    collection_name=rc.get("collection_name", ""),
+                    content_preview=content[:200] + "..." if len(content) > 200 else content,
+                    page_number=rc.get("page_number"),
+                    similarity_score=rc.get("similarity_score", 0.0),
+                ))
+        elif msg.source_chunks:
+            # Fallback for old messages without rag_chunks metadata
             from app.models.chunk import Chunk
-            from app.models.document import Document
-            from app.models.collection import Collection
+            from app.models.document import Document as DocModel
+            from app.models.collection import Collection as ColModel
             chunk_result = await db.execute(
                 select(
                     Chunk.id, Chunk.content, Chunk.page_number,
-                    Document.original_name.label("document_name"),
-                    Collection.name.label("collection_name"),
+                    Chunk.document_id,
+                    DocModel.original_name.label("document_name"),
+                    ColModel.name.label("collection_name"),
                 )
-                .join(Document, Chunk.document_id == Document.id)
-                .join(Collection, Document.collection_id == Collection.id)
+                .join(DocModel, Chunk.document_id == DocModel.id)
+                .join(ColModel, DocModel.collection_id == ColModel.id)
                 .where(Chunk.id.in_(msg.source_chunks))
             )
             for row in chunk_result.fetchall():
                 sources.append(SourceChunk(
                     chunk_id=row.id,
+                    document_id=row.document_id,
                     document_name=row.document_name,
                     collection_name=row.collection_name,
                     content_preview=row.content[:200] + "..." if len(row.content) > 200 else row.content,
@@ -154,7 +171,7 @@ async def get_conversation_messages(
             content=msg.content,
             sources=sources,
             enriched_query=msg.metadata_.get("enriched_query") if msg.metadata_ else None,
-            rag_chunks=msg.metadata_.get("rag_chunks", []) if msg.metadata_ else [],
+            rag_chunks=stored_rag_chunks,
             thinking=msg.metadata_.get("thinking") if msg.metadata_ else None,
             document_delivery=msg.metadata_.get("document_delivery") if msg.metadata_ else None,
             created_at=msg.created_at,
@@ -372,7 +389,8 @@ async def ask_question_stream(
 
         sources = [
             SourceChunk(
-                chunk_id=r.chunk_id, document_name=r.document_name,
+                chunk_id=r.chunk_id, document_id=r.document_id,
+                document_name=r.document_name,
                 collection_name=r.collection_name,
                 content_preview=r.content[:200] + "..." if len(r.content) > 200 else r.content,
                 page_number=r.page_number, similarity_score=r.similarity_score,
@@ -401,6 +419,7 @@ async def ask_question_stream(
 
         rag_chunks = [
             {
+                "document_id": r.document_id,
                 "document_name": r.document_name, "collection_name": r.collection_name,
                 "page_number": r.page_number, "content": r.content,
                 "similarity_score": r.similarity_score,

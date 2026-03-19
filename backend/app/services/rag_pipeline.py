@@ -106,6 +106,7 @@ class RAGPipeline:
         # 6. Konversation speichern
         rag_chunks = [
             {
+                "document_id": r.document_id,
                 "document_name": r.document_name,
                 "collection_name": r.collection_name,
                 "page_number": r.page_number,

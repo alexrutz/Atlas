@@ -12,10 +12,11 @@ import type { DocumentDelivery } from '../types'
 interface PdfViewerProps {
   delivery: DocumentDelivery
   onClose: () => void
+  initialPage?: number
 }
 
-export default function PdfViewer({ delivery, onClose }: PdfViewerProps) {
-  const [currentPage, setCurrentPage] = useState(1)
+export default function PdfViewer({ delivery, onClose, initialPage }: PdfViewerProps) {
+  const [currentPage, setCurrentPage] = useState(initialPage || 1)
   const [pageCount, setPageCount] = useState(delivery.page_count || 1)
   const [loading, setLoading] = useState(true)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
