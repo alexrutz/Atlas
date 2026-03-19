@@ -1,9 +1,11 @@
 """API-Routen: Dokument-Upload und -Verwaltung."""
 
+import io
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -152,3 +154,93 @@ async def get_status(
         processing_error=document.processing_error,
         chunk_count=document.chunk_count,
     )
+
+
+@router.get("/documents/{document_id}/download")
+async def download_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Dokument-Datei herunterladen."""
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    document = result.scalar_one_or_none()
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dokument nicht gefunden")
+
+    file_path = Path(document.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Datei nicht gefunden")
+
+    return FileResponse(
+        path=str(file_path),
+        filename=document.original_name,
+        media_type="application/octet-stream",
+    )
+
+
+@router.get("/documents/{document_id}/page-count")
+async def get_page_count(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Seitenanzahl eines PDF-Dokuments abfragen."""
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    document = result.scalar_one_or_none()
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dokument nicht gefunden")
+
+    if document.file_type != ".pdf":
+        return {"page_count": 1, "document_id": document_id}
+
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(document.file_path)
+        return {"page_count": len(reader.pages), "document_id": document_id}
+    except Exception:
+        return {"page_count": 1, "document_id": document_id}
+
+
+@router.get("/documents/{document_id}/page/{page_number}")
+async def get_document_page(
+    document_id: int,
+    page_number: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Einzelne Seite eines PDF-Dokuments als PNG-Bild zurückgeben."""
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    document = result.scalar_one_or_none()
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dokument nicht gefunden")
+
+    file_path = Path(document.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Datei nicht gefunden")
+
+    if document.file_type != ".pdf":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Seitenansicht nur für PDFs verfügbar")
+
+    try:
+        from pdf2image import convert_from_path
+        images = convert_from_path(
+            str(file_path),
+            first_page=page_number,
+            last_page=page_number,
+            dpi=200,
+        )
+        if not images:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Seite nicht gefunden")
+
+        buf = io.BytesIO()
+        images[0].save(buf, format="PNG")
+        buf.seek(0)
+        return StreamingResponse(buf, media_type="image/png")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Fehler beim Rendern der Seite: {str(e)}",
+        )

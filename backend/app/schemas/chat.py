@@ -47,6 +47,15 @@ class RagChunk(BaseModel):
     similarity_score: float
 
 
+class DocumentDeliveryResponse(BaseModel):
+    document_id: int
+    document_name: str
+    collection_name: str
+    file_type: str
+    page_count: int
+    reason: str = ""
+
+
 class MessageResponse(BaseModel):
     id: int
     role: str
@@ -55,6 +64,7 @@ class MessageResponse(BaseModel):
     enriched_query: str | None = None
     rag_chunks: list[RagChunk] = []
     thinking: str | None = None
+    document_delivery: DocumentDeliveryResponse | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useChatStore } from '../stores/chatStore'
 import type { SourceChunk, RagChunk } from '../types'
+import DocumentCard from '../components/DocumentCard'
 
 // =============================================================================
 // SourcesPanel
@@ -217,7 +218,9 @@ export default function ChatPage() {
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
-    if (ragMode && selectedCollectionIds.length === 0) return
+    // "gib mir" bypasses collection selection requirement (searches all)
+    const isGibMir = /^\s*gib\s+mir\b/i.test(input)
+    if (ragMode && selectedCollectionIds.length === 0 && !isGibMir) return
     const question = input
     setInput('')
     await sendMessageStream(question)
@@ -353,9 +356,14 @@ export default function ChatPage() {
                 {msg.role === 'user' ? (
                   <p className="whitespace-pre-wrap">{msg.content}</p>
                 ) : (
-                  <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-li:my-0">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
-                  </div>
+                  <>
+                    <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-li:my-0">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                    {msg.document_delivery && (
+                      <DocumentCard delivery={msg.document_delivery} />
+                    )}
+                  </>
                 )}
                 <SourcesPanel sources={msg.sources} />
               </div>
@@ -416,7 +424,7 @@ export default function ChatPage() {
             <div className="flex flex-col items-center gap-1">
               <button
                 onClick={handleSend}
-                disabled={isLoading || !input.trim() || (ragMode && selectedCollectionIds.length === 0)}
+                disabled={isLoading || !input.trim() || (ragMode && selectedCollectionIds.length === 0 && !/^\s*gib\s+mir\b/i.test(input))}
                 className="px-6 py-3 bg-atlas-600 text-white rounded-lg hover:bg-atlas-700 disabled:opacity-50 transition"
               >
                 Senden

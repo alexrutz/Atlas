@@ -62,7 +62,7 @@ def parse_document(file_path: str, file_type: str) -> ParsedDocument:
 
 
 def _parse_pdf(file_path: str) -> ParsedDocument:
-    """Parst ein PDF-Dokument."""
+    """Parst ein PDF-Dokument. Fällt auf OCR zurück, wenn kein Text extrahiert werden kann."""
     from pypdf import PdfReader
 
     reader = PdfReader(file_path)
@@ -79,11 +79,56 @@ def _parse_pdf(file_path: str) -> ParsedDocument:
             ))
             full_text.append(text)
 
+    # Wenn kein Text extrahiert wurde (z.B. gescannte Dokumente), OCR verwenden
+    if not full_text:
+        from app.core.config import settings
+        if settings.documents.ocr_enabled:
+            logger.info(f"Kein Text in PDF gefunden, starte OCR für: {file_path}")
+            ocr_sections, ocr_text = _ocr_pdf(file_path, settings.documents.ocr_language)
+            if ocr_text:
+                return ParsedDocument(
+                    text="\n\n".join(ocr_text),
+                    sections=ocr_sections,
+                    page_count=len(reader.pages),
+                )
+            logger.warning(f"OCR konnte keinen Text extrahieren: {file_path}")
+        else:
+            logger.warning(f"Kein Text in PDF und OCR deaktiviert: {file_path}")
+
     return ParsedDocument(
         text="\n\n".join(full_text),
         sections=sections,
         page_count=len(reader.pages),
     )
+
+
+def _ocr_pdf(file_path: str, ocr_language: str = "deu+eng") -> tuple[list[ParsedSection], list[str]]:
+    """Führt OCR auf allen Seiten eines PDFs durch."""
+    try:
+        from pdf2image import convert_from_path
+        import pytesseract
+    except ImportError:
+        logger.error("pdf2image oder pytesseract nicht installiert, OCR nicht möglich")
+        return [], []
+
+    sections = []
+    full_text = []
+
+    try:
+        images = convert_from_path(file_path, dpi=300)
+        for i, image in enumerate(images):
+            text = pytesseract.image_to_string(image, lang=ocr_language)
+            if text.strip():
+                sections.append(ParsedSection(
+                    header=None,
+                    content=text.strip(),
+                    page_number=i + 1,
+                ))
+                full_text.append(text.strip())
+    except Exception as e:
+        logger.error(f"OCR-Fehler: {e}")
+
+    return sections, full_text
 
 
 def _parse_docx(file_path: str) -> ParsedDocument:

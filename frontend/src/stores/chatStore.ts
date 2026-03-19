@@ -3,8 +3,13 @@
  */
 
 import { create } from 'zustand'
-import type { Conversation, Message, Collection, ChatResponse, SourceChunk, RagChunk } from '../types'
+import type { Conversation, Message, Collection, ChatResponse, SourceChunk, RagChunk, DocumentDelivery } from '../types'
 import { chatApi, collectionsApi, settingsApi } from '../services/api'
+
+/** Strip <<<DELIVER_DOCUMENT>>>...<<<END_DELIVER_DOCUMENT>>> markers from display text */
+function stripDeliveryMarkers(text: string): string {
+  return text.replace(/<<<DELIVER_DOCUMENT>>>[\s\S]*?<<<END_DELIVER_DOCUMENT>>>/g, '').trim()
+}
 
 interface ChatState {
   conversations: Conversation[]
@@ -154,6 +159,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let conversationId = currentConversationId
       let enrichedQuery: string | null = null
       let ragChunks: RagChunk[] = []
+      let documentDelivery: DocumentDelivery | null = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -172,7 +178,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             if (event.type === 'token') {
               fullContent += event.content
-              set({ streamingContent: fullContent })
+              set({ streamingContent: stripDeliveryMarkers(fullContent) })
             } else if (event.type === 'thinking') {
               fullThinking += event.content
               set({ streamingThinking: fullThinking })
@@ -186,6 +192,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
               }))
             } else if (event.type === 'sources') {
               sources = event.sources
+            } else if (event.type === 'document_delivery') {
+              documentDelivery = {
+                document_id: event.document_id,
+                document_name: event.document_name,
+                collection_name: event.collection_name,
+                file_type: event.file_type,
+                page_count: event.page_count,
+                reason: event.reason,
+              }
             } else if (event.type === 'done') {
               conversationId = event.conversation_id
             } else if (event.type === 'error') {
@@ -201,11 +216,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const assistantMsg: Message = {
         id: Date.now() + 1,
         role: 'assistant',
-        content: fullContent,
+        content: stripDeliveryMarkers(fullContent),
         sources,
         enriched_query: enrichedQuery,
         rag_chunks: ragChunks,
         thinking: fullThinking || null,
+        document_delivery: documentDelivery,
         created_at: new Date().toISOString(),
       }
 
