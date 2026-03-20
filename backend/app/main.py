@@ -78,12 +78,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"LLM: {settings.llm.model} @ {settings.llm.base_url}")
     logger.info(f"Embedding: {settings.embedding.model} @ {settings.embedding.base_url}")
     # Datenbank-Tabellen erstellen (nur bei Erststart, danach Alembic nutzen)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # Fehlende Spalten hinzufügen (für bestehende Datenbanken ohne Alembic)
-        await conn.execute(text(
-            "ALTER TABLE collections ADD COLUMN IF NOT EXISTS context_text TEXT"
-        ))
+    # IntegrityError wird abgefangen, falls mehrere Worker gleichzeitig starten
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            # Fehlende Spalten hinzufügen (für bestehende Datenbanken ohne Alembic)
+            await conn.execute(text(
+                "ALTER TABLE collections ADD COLUMN IF NOT EXISTS context_text TEXT"
+            ))
+    except IntegrityError:
+        logger.info("Tabellen existieren bereits (anderer Worker war schneller).")
 
     # Admin-Benutzer anlegen, falls keiner existiert
     await seed_admin_user()
