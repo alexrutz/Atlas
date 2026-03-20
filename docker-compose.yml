@@ -82,19 +82,16 @@ services:
       - "8081:8081"
     volumes:
       - ../models:/models:ro
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        exec llama-server \
-          --host 0.0.0.0 \
-          --port 8081 \
-          --model /models/${EMBED_MODEL} \
-          --ctx-size ${EMBED_CTX_SIZE:-32768} \
-          --batch-size ${EMBED_CTX_SIZE:-32768} \
-          --ubatch-size ${EMBED_CTX_SIZE:-32768} \
-          --n-gpu-layers 99 \
-          --embedding \
-          ${EMBED_EXTRA_ARGS}
+    command: >
+      --host 0.0.0.0
+      --port 8081
+      --model /models/${EMBED_MODEL}
+      --ctx-size ${EMBED_CTX_SIZE:-32768}
+      --batch-size ${EMBED_CTX_SIZE:-32768}
+      --ubatch-size ${EMBED_CTX_SIZE:-32768}
+      --n-gpu-layers 99
+      --embedding
+      ${EMBED_EXTRA_ARGS}
     deploy:
       resources:
         reservations:
