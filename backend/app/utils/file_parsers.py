@@ -62,10 +62,36 @@ def parse_document(file_path: str, file_type: str) -> ParsedDocument:
 
 
 def _parse_pdf(file_path: str) -> ParsedDocument:
-    """Parst ein PDF-Dokument. Fällt auf OCR zurück, wenn kein Text extrahiert werden kann."""
+    """Parst ein PDF-Dokument.
+
+    Wenn vlm_always aktiviert ist, wird VLM-OCR für ALLE PDFs verwendet
+    (bessere Strukturerkennung bei Tabellen, Spalten, Überschriften).
+    Andernfalls wird VLM/Tesseract nur als Fallback für gescannte PDFs genutzt.
+    """
     from pypdf import PdfReader
+    from app.core.config import settings
 
     reader = PdfReader(file_path)
+    page_count = len(reader.pages)
+
+    # --- VLM-always-Modus: VLM für alle PDFs (layout-aware Chunks) ---
+    use_vlm_always = (
+        settings.documents.vlm_always
+        and settings.documents.ocr_backend == "vlm"
+        and settings.vlm_ocr.enabled
+    )
+    if use_vlm_always:
+        logger.info(f"VLM-always: Verarbeite PDF mit Layout-aware OCR: {file_path}")
+        vlm_sections, vlm_text = _vlm_ocr_pdf(file_path)
+        if vlm_text:
+            return ParsedDocument(
+                text="\n\n".join(vlm_text),
+                sections=vlm_sections,
+                page_count=page_count,
+            )
+        logger.warning(f"VLM-always lieferte keinen Text, Fallback auf pypdf: {file_path}")
+
+    # --- Standard-Modus: Text mit pypdf extrahieren ---
     sections = []
     full_text = []
 
@@ -81,23 +107,20 @@ def _parse_pdf(file_path: str) -> ParsedDocument:
 
     # Wenn kein Text extrahiert wurde (z.B. gescannte Dokumente), OCR verwenden
     if not full_text:
-        from app.core.config import settings
         if settings.documents.ocr_enabled:
             logger.info(f"Kein Text in PDF gefunden, starte OCR für: {file_path}")
 
             backend = getattr(settings.documents, "ocr_backend", "tesseract")
             if backend == "vlm" and settings.vlm_ocr.enabled:
-                # VLM-OCR mit Layout-as-thought (Qianfan-OCR)
                 ocr_sections, ocr_text = _vlm_ocr_pdf(file_path)
             else:
-                # Legacy Tesseract-OCR
                 ocr_sections, ocr_text = _ocr_pdf(file_path, settings.documents.ocr_language)
 
             if ocr_text:
                 return ParsedDocument(
                     text="\n\n".join(ocr_text),
                     sections=ocr_sections,
-                    page_count=len(reader.pages),
+                    page_count=page_count,
                 )
             logger.warning(f"OCR konnte keinen Text extrahieren: {file_path}")
         else:
@@ -106,7 +129,7 @@ def _parse_pdf(file_path: str) -> ParsedDocument:
     return ParsedDocument(
         text="\n\n".join(full_text),
         sections=sections,
-        page_count=len(reader.pages),
+        page_count=page_count,
     )
 
 

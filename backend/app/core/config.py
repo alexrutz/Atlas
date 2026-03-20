@@ -147,6 +147,7 @@ class DocumentsConfig(BaseModel):
     ocr_enabled: bool = True
     ocr_language: str = "deu+eng"
     ocr_backend: str = "vlm"  # "vlm" (Qianfan-OCR) or "tesseract" (legacy)
+    vlm_always: bool = True  # Use VLM for ALL PDFs (layout-aware), not just scanned ones
     temp_upload_dir: str = "/tmp/atlas_uploads"
 
 

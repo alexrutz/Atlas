@@ -158,6 +158,7 @@ documents:
   ocr_enabled: true
   ocr_language: "deu+eng"
   ocr_backend: "vlm"           # "vlm" (Qianfan-OCR) or "tesseract" (legacy)
+  vlm_always: true             # Use VLM for ALL PDFs (layout-aware chunks), not just scanned ones
   temp_upload_dir: "/tmp/atlas_uploads"
 
 # -----------------------------------------------------------------------------
