@@ -221,6 +221,61 @@ class LLMService:
             )
             raise
 
+    def build_document_delivery_prompt(
+        self,
+        original_question: str,
+        enriched_question: str,
+        contexts: list[dict],
+    ) -> str:
+        """Build a prompt for the document delivery agent.
+
+        The LLM decides which single document is most relevant and outputs
+        a structured tool call to deliver it to the user.
+        """
+        context_parts = []
+        for i, ctx in enumerate(contexts, 1):
+            source_info = f"[Source {i}: {ctx['document_name']}"
+            if ctx.get("page_number"):
+                source_info += f", page {ctx['page_number']}"
+            source_info += f", document_id={ctx.get('document_id', 'unknown')}"
+            source_info += "]"
+            context_parts.append(f"{source_info}\n{ctx['content']}")
+
+        context_text = "\n\n---\n\n".join(context_parts)
+
+        if enriched_question != original_question:
+            question_block = (
+                f"ORIGINAL REQUEST: {original_question}\n"
+                f"ENRICHED QUERY: {enriched_question}"
+            )
+        else:
+            question_block = f"REQUEST: {original_question}"
+
+        return f"""The user wants you to find and deliver a specific document.
+Based on the retrieved document excerpts below, determine which SINGLE document is the most relevant match.
+
+You MUST respond with EXACTLY this format - a brief explanation followed by a tool call block:
+
+1. A short sentence explaining why this document matches (in the user's language).
+2. Then on a new line, the tool call:
+
+<<<DELIVER_DOCUMENT>>>
+{{"document_name": "exact_filename.pdf", "document_id": 123, "reason": "Brief reason"}}
+<<<END_DELIVER_DOCUMENT>>>
+
+IMPORTANT:
+- Use the EXACT document_name and document_id from the sources.
+- Pick only ONE document - the single best match.
+- If multiple chunks come from the same document, that's a strong signal it's the right one.
+- If you cannot find a relevant document, respond normally without the tool call block.
+
+DOCUMENTS:
+{context_text}
+
+{question_block}
+
+ANSWER:"""
+
     def build_rag_prompt(
         self,
         original_question: str,

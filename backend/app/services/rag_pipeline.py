@@ -106,6 +106,7 @@ class RAGPipeline:
         # 6. Konversation speichern
         rag_chunks = [
             {
+                "document_id": r.document_id,
                 "document_name": r.document_name,
                 "collection_name": r.collection_name,
                 "page_number": r.page_number,
@@ -180,6 +181,7 @@ class RAGPipeline:
         enriched_query: str | None = None,
         rag_chunks: list[dict] | None = None,
         thinking: str | None = None,
+        document_delivery: dict | None = None,
     ) -> int:
         if conversation_id:
             result = await self.db.execute(
@@ -210,6 +212,8 @@ class RAGPipeline:
             assistant_metadata["rag_chunks"] = rag_chunks
         if thinking:
             assistant_metadata["thinking"] = thinking
+        if document_delivery:
+            assistant_metadata["document_delivery"] = document_delivery
         assistant_msg = Message(
             conversation_id=conv.id, role="assistant", content=answer,
             source_chunks=[r.chunk_id for r in results] if results else [],

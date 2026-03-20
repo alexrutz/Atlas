@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -11,6 +12,8 @@ from sqlalchemy import select, func
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
+from app.models.document import Document
+from app.models.collection import Collection
 from app.models.conversation import Conversation, Message, UserSelectedCollection
 from app.schemas.chat import (
     ChatRequest, ChatResponse, ConversationResponse,
@@ -21,6 +24,15 @@ from app.services.llm_diagnostic import (
     log_free_chat_call,
     log_free_chat_stream_complete,
     log_rag_stream_complete,
+)
+
+# Pattern to detect "gib mir" trigger (case-insensitive, at start of message)
+_GIB_MIR_PATTERN = re.compile(r"^\s*gib\s+mir\b", re.IGNORECASE)
+
+# Pattern to extract the tool call from LLM response
+_DELIVER_DOC_PATTERN = re.compile(
+    r"<<<DELIVER_DOCUMENT>>>\s*(\{.*?\})\s*<<<END_DELIVER_DOCUMENT>>>",
+    re.DOTALL,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,23 +124,40 @@ async def get_conversation_messages(
     response = []
     for msg in messages:
         sources = []
-        if msg.source_chunks:
+        # Reconstruct sources from rag_chunks metadata (has scores + document_id)
+        stored_rag_chunks = msg.metadata_.get("rag_chunks", []) if msg.metadata_ else []
+        if stored_rag_chunks:
+            for i, rc in enumerate(stored_rag_chunks):
+                content = rc.get("content", "")
+                sources.append(SourceChunk(
+                    chunk_id=msg.source_chunks[i] if msg.source_chunks and i < len(msg.source_chunks) else 0,
+                    document_id=rc.get("document_id"),
+                    document_name=rc.get("document_name", ""),
+                    collection_name=rc.get("collection_name", ""),
+                    content_preview=content[:200] + "..." if len(content) > 200 else content,
+                    page_number=rc.get("page_number"),
+                    similarity_score=rc.get("similarity_score", 0.0),
+                ))
+        elif msg.source_chunks:
+            # Fallback for old messages without rag_chunks metadata
             from app.models.chunk import Chunk
-            from app.models.document import Document
-            from app.models.collection import Collection
+            from app.models.document import Document as DocModel
+            from app.models.collection import Collection as ColModel
             chunk_result = await db.execute(
                 select(
                     Chunk.id, Chunk.content, Chunk.page_number,
-                    Document.original_name.label("document_name"),
-                    Collection.name.label("collection_name"),
+                    Chunk.document_id,
+                    DocModel.original_name.label("document_name"),
+                    ColModel.name.label("collection_name"),
                 )
-                .join(Document, Chunk.document_id == Document.id)
-                .join(Collection, Document.collection_id == Collection.id)
+                .join(DocModel, Chunk.document_id == DocModel.id)
+                .join(ColModel, DocModel.collection_id == ColModel.id)
                 .where(Chunk.id.in_(msg.source_chunks))
             )
             for row in chunk_result.fetchall():
                 sources.append(SourceChunk(
                     chunk_id=row.id,
+                    document_id=row.document_id,
                     document_name=row.document_name,
                     collection_name=row.collection_name,
                     content_preview=row.content[:200] + "..." if len(row.content) > 200 else row.content,
@@ -142,8 +171,9 @@ async def get_conversation_messages(
             content=msg.content,
             sources=sources,
             enriched_query=msg.metadata_.get("enriched_query") if msg.metadata_ else None,
-            rag_chunks=msg.metadata_.get("rag_chunks", []) if msg.metadata_ else [],
+            rag_chunks=stored_rag_chunks,
             thinking=msg.metadata_.get("thinking") if msg.metadata_ else None,
+            document_delivery=msg.metadata_.get("document_delivery") if msg.metadata_ else None,
             created_at=msg.created_at,
         ))
     return response
@@ -177,6 +207,75 @@ async def ask_question(
         )
 
 
+async def _resolve_document_delivery(
+    db: AsyncSession, full_answer: str, results: list,
+) -> dict | None:
+    """Parse the LLM response for a <<<DELIVER_DOCUMENT>>> tool call and resolve the document."""
+    match = _DELIVER_DOC_PATTERN.search(full_answer)
+    if not match:
+        return None
+
+    try:
+        tool_call = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse DELIVER_DOCUMENT JSON from LLM response")
+        return None
+
+    doc_name = tool_call.get("document_name", "")
+    doc_id = tool_call.get("document_id")
+
+    # Try to find the document by ID first, then by name
+    document = None
+    if doc_id:
+        result = await db.execute(select(Document).where(Document.id == int(doc_id)))
+        document = result.scalar_one_or_none()
+
+    if not document and doc_name:
+        result = await db.execute(
+            select(Document).where(Document.original_name == doc_name)
+        )
+        document = result.scalar_one_or_none()
+
+    # Fallback: find document by matching against retrieval result document names
+    if not document and results:
+        # Use the most frequently occurring document in results
+        from collections import Counter
+        doc_counts = Counter(r.document_name for r in results)
+        most_common_name = doc_counts.most_common(1)[0][0]
+        result = await db.execute(
+            select(Document).where(Document.original_name == most_common_name)
+        )
+        document = result.scalar_one_or_none()
+
+    if not document:
+        return None
+
+    # Get collection name
+    col_result = await db.execute(
+        select(Collection.name).where(Collection.id == document.collection_id)
+    )
+    collection_name = col_result.scalar_one_or_none() or "Unknown"
+
+    # Get page count for PDFs
+    page_count = 1
+    if document.file_type == ".pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(document.file_path)
+            page_count = len(reader.pages)
+        except Exception:
+            pass
+
+    return {
+        "document_id": document.id,
+        "document_name": document.original_name,
+        "collection_name": collection_name,
+        "file_type": document.file_type,
+        "page_count": page_count,
+        "reason": tool_call.get("reason", ""),
+    }
+
+
 @router.post("/chat/stream")
 async def ask_question_stream(
     request: ChatRequest,
@@ -185,10 +284,11 @@ async def ask_question_stream(
 ):
     """Frage stellen mit Streaming-Antwort über Server-Sent Events."""
     pipeline = RAGPipeline(db)
+    is_document_delivery = bool(_GIB_MIR_PATTERN.search(request.question))
 
     try:
-        # Free chat mode - no retrieval needed
-        if not request.rag_mode:
+        # Free chat mode - no retrieval needed (but not for "gib mir")
+        if not request.rag_mode and not is_document_delivery:
             system = pipeline.llm.config.free_chat_system_prompt or pipeline.llm.config.system_prompt
 
             async def free_chat_stream():
@@ -244,7 +344,7 @@ async def ask_question_stream(
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
             )
 
-        # RAG mode
+        # RAG mode (or document delivery mode)
         allowed_ids = await pipeline._get_allowed_collection_ids(current_user)
         if not allowed_ids:
             async def no_access():
@@ -252,7 +352,11 @@ async def ask_question_stream(
                 yield f"data: {data}\n\n"
             return StreamingResponse(no_access(), media_type="text/event-stream")
 
-        if request.collection_ids:
+        if is_document_delivery:
+            # Document delivery: ALWAYS search ALL accessible collections
+            search_ids = allowed_ids
+            logger.info(f"Document delivery mode: searching all {len(search_ids)} collections")
+        elif request.collection_ids:
             search_ids = [cid for cid in request.collection_ids if cid in allowed_ids]
         else:
             search_ids = await pipeline._get_selected_collection_ids(current_user, allowed_ids)
@@ -285,7 +389,8 @@ async def ask_question_stream(
 
         sources = [
             SourceChunk(
-                chunk_id=r.chunk_id, document_name=r.document_name,
+                chunk_id=r.chunk_id, document_id=r.document_id,
+                document_name=r.document_name,
                 collection_name=r.collection_name,
                 content_preview=r.content[:200] + "..." if len(r.content) > 200 else r.content,
                 page_number=r.page_number, similarity_score=r.similarity_score,
@@ -293,14 +398,28 @@ async def ask_question_stream(
             for r in results
         ]
 
+        # Build contexts - include document_id for document delivery
         contexts = [
-            {"content": r.content, "document_name": r.document_name, "page_number": r.page_number}
+            {
+                "content": r.content,
+                "document_name": r.document_name,
+                "page_number": r.page_number,
+                "document_id": r.document_id,
+            }
             for r in results
         ]
-        prompt = pipeline.llm.build_rag_prompt(request.question, enriched_query, contexts)
+
+        # Use special document delivery prompt or standard RAG prompt
+        if is_document_delivery:
+            prompt = pipeline.llm.build_document_delivery_prompt(
+                request.question, enriched_query, contexts,
+            )
+        else:
+            prompt = pipeline.llm.build_rag_prompt(request.question, enriched_query, contexts)
 
         rag_chunks = [
             {
+                "document_id": r.document_id,
                 "document_name": r.document_name, "collection_name": r.collection_name,
                 "page_number": r.page_number, "content": r.content,
                 "similarity_score": r.similarity_score,
@@ -347,6 +466,21 @@ async def ask_question_stream(
                     thinking=full_thinking or None,
                 )
 
+                # Document delivery: parse LLM response for tool call
+                delivery_info = None
+                if is_document_delivery:
+                    delivery_info = await _resolve_document_delivery(db, full_answer, results)
+                    if delivery_info:
+                        delivery_data = json.dumps({
+                            "type": "document_delivery",
+                            **delivery_info,
+                        })
+                        yield f"data: {delivery_data}\n\n"
+
+                        # Clean the tool call markers from the saved answer
+                        clean_answer = _DELIVER_DOC_PATTERN.sub("", full_answer).strip()
+                        full_answer = clean_answer
+
                 # Save conversation
                 conv_id = await pipeline._save_to_conversation(
                     user=current_user,
@@ -358,6 +492,7 @@ async def ask_question_stream(
                     enriched_query=enriched_query,
                     rag_chunks=rag_chunks,
                     thinking=full_thinking or None,
+                    document_delivery=delivery_info,
                 )
                 await db.commit()
 

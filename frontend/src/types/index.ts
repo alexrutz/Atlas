@@ -84,6 +84,7 @@ export interface Conversation {
 }
 
 export interface RagChunk {
+  document_id?: number | null
   document_name: string
   collection_name: string
   page_number: number | null
@@ -99,16 +100,27 @@ export interface Message {
   enriched_query?: string | null
   rag_chunks?: RagChunk[]
   thinking?: string | null
+  document_delivery?: DocumentDelivery | null
   created_at: string
 }
 
 export interface SourceChunk {
   chunk_id: number
+  document_id?: number | null
   document_name: string
   collection_name: string
   content_preview: string
   page_number: number | null
   similarity_score: number
+}
+
+export interface DocumentDelivery {
+  document_id: number
+  document_name: string
+  collection_name: string
+  file_type: string
+  page_count: number
+  reason: string
 }
 
 export interface ChatResponse {

@@ -141,6 +141,12 @@ export const documentsApi = {
   },
   delete: (documentId: number) => api.delete(`/documents/${documentId}`),
   getStatus: (documentId: number) => api.get(`/documents/${documentId}/status`).then(r => r.data),
+  getPageCount: (documentId: number) =>
+    api.get<{ page_count: number; document_id: number }>(`/documents/${documentId}/page-count`).then(r => r.data),
+  getPageImageUrl: (documentId: number, pageNumber: number) =>
+    `/api/documents/${documentId}/page/${pageNumber}`,
+  getDownloadUrl: (documentId: number) =>
+    `/api/documents/${documentId}/download`,
 }
 
 // --- Settings ---

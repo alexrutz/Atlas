@@ -23,6 +23,7 @@ class ChatResponse(BaseModel):
 
 class SourceChunk(BaseModel):
     chunk_id: int
+    document_id: int | None = None
     document_name: str
     collection_name: str
     content_preview: str
@@ -40,11 +41,21 @@ class ConversationResponse(BaseModel):
 
 
 class RagChunk(BaseModel):
+    document_id: int | None = None
     document_name: str
     collection_name: str
     page_number: int | None
     content: str
     similarity_score: float
+
+
+class DocumentDeliveryResponse(BaseModel):
+    document_id: int
+    document_name: str
+    collection_name: str
+    file_type: str
+    page_count: int
+    reason: str = ""
 
 
 class MessageResponse(BaseModel):
@@ -55,6 +66,7 @@ class MessageResponse(BaseModel):
     enriched_query: str | None = None
     rag_chunks: list[RagChunk] = []
     thinking: str | None = None
+    document_delivery: DocumentDeliveryResponse | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

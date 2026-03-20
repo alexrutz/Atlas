@@ -5,13 +5,15 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useChatStore } from '../stores/chatStore'
-import type { SourceChunk, RagChunk } from '../types'
+import type { SourceChunk, RagChunk, DocumentDelivery } from '../types'
+import DocumentCard from '../components/DocumentCard'
+import PdfViewer from '../components/PdfViewer'
 
 // =============================================================================
 // SourcesPanel
 // =============================================================================
 
-function SourcesPanel({ sources }: { sources: SourceChunk[] }) {
+function SourcesPanel({ sources, onOpenSource }: { sources: SourceChunk[]; onOpenSource?: (src: SourceChunk) => void }) {
   const [expanded, setExpanded] = useState(false)
 
   if (sources.length === 0) return null
@@ -27,32 +29,48 @@ function SourcesPanel({ sources }: { sources: SourceChunk[] }) {
       </button>
       {expanded && (
         <div className="mt-2 space-y-2">
-          {sources.map((src, i) => (
-            <div key={i} className="bg-gray-50 rounded p-2 text-xs">
-              <div className="flex items-center gap-2 font-medium text-gray-700">
-                <span className="bg-atlas-100 text-atlas-700 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                  {i + 1}
-                </span>
-                {src.document_name}
-                {src.page_number && <span className="text-gray-400">S. {src.page_number}</span>}
-                <span className="text-gray-400 ml-auto">{src.collection_name}</span>
-              </div>
-              {src.content_preview && (
-                <p className="mt-1 text-gray-500 line-clamp-3">{src.content_preview}</p>
-              )}
-              {src.similarity_score > 0 && (
-                <div className="mt-1 flex items-center gap-1">
-                  <div className="h-1 w-16 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-atlas-500 rounded-full"
-                      style={{ width: `${Math.round(src.similarity_score * 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-[10px] text-gray-400">{Math.round(src.similarity_score * 100)}%</span>
+          {sources.map((src, i) => {
+            const isClickable = !!src.document_id && !!onOpenSource
+            return (
+              <div
+                key={i}
+                className={`bg-gray-50 rounded p-2 text-xs ${isClickable ? 'cursor-pointer hover:bg-atlas-50 hover:border-atlas-200 border border-transparent transition' : ''}`}
+                onClick={() => isClickable && onOpenSource(src)}
+                title={isClickable ? 'Klicken um PDF zu öffnen' : undefined}
+              >
+                <div className="flex items-center gap-2 font-medium text-gray-700">
+                  <span className="bg-atlas-100 text-atlas-700 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                    {i + 1}
+                  </span>
+                  <span className={isClickable ? 'text-atlas-700 underline decoration-dotted' : ''}>
+                    {src.document_name}
+                  </span>
+                  {src.page_number && <span className="text-gray-400">S. {src.page_number}</span>}
+                  {isClickable && (
+                    <svg className="w-3.5 h-3.5 text-atlas-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  )}
+                  <span className="text-gray-400 ml-auto">{src.collection_name}</span>
                 </div>
-              )}
-            </div>
-          ))}
+                {src.content_preview && (
+                  <p className="mt-1 text-gray-500 line-clamp-3">{src.content_preview}</p>
+                )}
+                {src.similarity_score > 0 && (
+                  <div className="mt-1 flex items-center gap-1">
+                    <div className="h-1 w-16 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-atlas-500 rounded-full"
+                        style={{ width: `${Math.round(src.similarity_score * 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-gray-400">{Math.round(src.similarity_score * 100)}%</span>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -205,6 +223,22 @@ export default function ChatPage() {
 
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [pdfViewer, setPdfViewer] = useState<{ delivery: DocumentDelivery; initialPage?: number } | null>(null)
+
+  const handleOpenSource = (src: SourceChunk) => {
+    if (!src.document_id) return
+    setPdfViewer({
+      delivery: {
+        document_id: src.document_id,
+        document_name: src.document_name,
+        collection_name: src.collection_name,
+        file_type: '.pdf',
+        page_count: 0,
+        reason: '',
+      },
+      initialPage: src.page_number || 1,
+    })
+  }
 
   useEffect(() => {
     loadCollections()
@@ -217,7 +251,9 @@ export default function ChatPage() {
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
-    if (ragMode && selectedCollectionIds.length === 0) return
+    // "gib mir" bypasses collection selection requirement (searches all)
+    const isGibMir = /^\s*gib\s+mir\b/i.test(input)
+    if (ragMode && selectedCollectionIds.length === 0 && !isGibMir) return
     const question = input
     setInput('')
     await sendMessageStream(question)
@@ -353,11 +389,16 @@ export default function ChatPage() {
                 {msg.role === 'user' ? (
                   <p className="whitespace-pre-wrap">{msg.content}</p>
                 ) : (
-                  <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-li:my-0">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
-                  </div>
+                  <>
+                    <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-headings:mb-1 prose-p:my-1 prose-li:my-0">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                    {msg.document_delivery && (
+                      <DocumentCard delivery={msg.document_delivery} />
+                    )}
+                  </>
                 )}
-                <SourcesPanel sources={msg.sources} />
+                <SourcesPanel sources={msg.sources} onOpenSource={handleOpenSource} />
               </div>
               {msg.role === 'assistant' && (
                 <div className="max-w-3xl w-full">
@@ -416,7 +457,7 @@ export default function ChatPage() {
             <div className="flex flex-col items-center gap-1">
               <button
                 onClick={handleSend}
-                disabled={isLoading || !input.trim() || (ragMode && selectedCollectionIds.length === 0)}
+                disabled={isLoading || !input.trim() || (ragMode && selectedCollectionIds.length === 0 && !/^\s*gib\s+mir\b/i.test(input))}
                 className="px-6 py-3 bg-atlas-600 text-white rounded-lg hover:bg-atlas-700 disabled:opacity-50 transition"
               >
                 Senden
@@ -460,6 +501,15 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* PDF Viewer Modal (from source click) */}
+      {pdfViewer && (
+        <PdfViewer
+          delivery={pdfViewer.delivery}
+          initialPage={pdfViewer.initialPage}
+          onClose={() => setPdfViewer(null)}
+        />
+      )}
     </div>
   )
 }
