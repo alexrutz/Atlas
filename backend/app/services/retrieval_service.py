@@ -156,19 +156,28 @@ class RetrievalService:
                 LIMIT :top_k * 2
             ),
             text_results AS (
-                SELECT c.id,
+                SELECT c.id, c.document_id, c.content, c.section_header, c.page_number,
+                       d.original_name as document_name, col.name as collection_name,
                        similarity(c.content, :query_text) as text_score
                 FROM chunks c
                 JOIN documents d ON c.document_id = d.id
+                JOIN collections col ON d.collection_id = col.id
                 WHERE d.collection_id = ANY(:collection_ids)
                   AND d.processing_status = 'completed'
                   AND c.content % :query_text
             )
-            SELECT vr.*,
+            SELECT COALESCE(vr.id, tr.id) as id,
+                   COALESCE(vr.document_id, tr.document_id) as document_id,
+                   COALESCE(vr.content, tr.content) as content,
+                   COALESCE(vr.section_header, tr.section_header) as section_header,
+                   COALESCE(vr.page_number, tr.page_number) as page_number,
+                   COALESCE(vr.document_name, tr.document_name) as document_name,
+                   COALESCE(vr.collection_name, tr.collection_name) as collection_name,
+                   COALESCE(vr.vector_score, 0) as vector_score,
                    COALESCE(tr.text_score, 0) as text_score,
-                   (:alpha * vr.vector_score + (1.0 - :alpha) * COALESCE(tr.text_score, 0)) as combined_score
+                   (:alpha * COALESCE(vr.vector_score, 0) + (1.0 - :alpha) * COALESCE(tr.text_score, 0)) as combined_score
             FROM vector_results vr
-            LEFT JOIN text_results tr ON vr.id = tr.id
+            FULL OUTER JOIN text_results tr ON vr.id = tr.id
             ORDER BY combined_score DESC
             LIMIT :top_k
         """)
