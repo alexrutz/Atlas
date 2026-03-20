@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
 from app.core.database import engine, Base, async_session
@@ -46,28 +46,25 @@ async def seed_admin_user():
     from app.models.user import User
 
     async with async_session() as session:
-        result = await session.execute(
-            select(User).where(User.username == settings.auth.default_admin_username)
+        stmt = (
+            pg_insert(User)
+            .values(
+                username=settings.auth.default_admin_username,
+                email=f"{settings.auth.default_admin_username}@atlas.local",
+                hashed_password=hash_password(settings.auth.default_admin_password),
+                full_name="Administrator",
+                is_admin=True,
+                is_active=True,
+            )
+            .on_conflict_do_nothing(index_elements=["username"])
+            .returning(User.id)
         )
-        if result.scalar_one_or_none():
-            logger.info("Admin-Benutzer existiert bereits.")
-            return
-
-        admin = User(
-            username=settings.auth.default_admin_username,
-            email=f"{settings.auth.default_admin_username}@atlas.local",
-            hashed_password=hash_password(settings.auth.default_admin_password),
-            full_name="Administrator",
-            is_admin=True,
-            is_active=True,
-        )
-        session.add(admin)
-        try:
-            await session.commit()
+        result = await session.execute(stmt)
+        await session.commit()
+        if result.fetchone():
             logger.info(f"Admin-Benutzer '{settings.auth.default_admin_username}' wurde erstellt.")
-        except IntegrityError:
-            await session.rollback()
-            logger.info("Admin-Benutzer wurde bereits von einem anderen Worker erstellt.")
+        else:
+            logger.info("Admin-Benutzer existiert bereits.")
 
 
 @asynccontextmanager
@@ -78,16 +75,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"LLM: {settings.llm.model} @ {settings.llm.base_url}")
     logger.info(f"Embedding: {settings.embedding.model} @ {settings.embedding.base_url}")
     # Datenbank-Tabellen erstellen (nur bei Erststart, danach Alembic nutzen)
-    # IntegrityError wird abgefangen, falls mehrere Worker gleichzeitig starten
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            # Fehlende Spalten hinzufügen (für bestehende Datenbanken ohne Alembic)
-            await conn.execute(text(
-                "ALTER TABLE collections ADD COLUMN IF NOT EXISTS context_text TEXT"
-            ))
-    except IntegrityError:
-        logger.info("Tabellen existieren bereits (anderer Worker war schneller).")
+    # Advisory lock serialisiert parallele Worker, sodass nur einer die Tabellen anlegt.
+    async with engine.begin() as conn:
+        await conn.execute(text("SELECT pg_advisory_xact_lock(20250320)"))
+        await conn.run_sync(Base.metadata.create_all)
+        # Fehlende Spalten hinzufügen (für bestehende Datenbanken ohne Alembic)
+        await conn.execute(text(
+            "ALTER TABLE collections ADD COLUMN IF NOT EXISTS context_text TEXT"
+        ))
 
     # Admin-Benutzer anlegen, falls keiner existiert
     await seed_admin_user()
