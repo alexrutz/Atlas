@@ -115,7 +115,7 @@ class QueryEnrichmentConfig(BaseModel):
 class RetrievalConfig(BaseModel):
     top_k: int = 10
     rerank: bool = True
-    rerank_model: str = "cross-encoder"
+    rerank_model: str = "ms-marco-MiniLM-L-12-v2"
     rerank_top_k: int = 5
     similarity_threshold: float = 0.3  # Drop chunks below this cosine similarity
     hybrid_search: bool = False  # Deprecated, ignored — pure vector search is used

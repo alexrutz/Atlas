@@ -1,8 +1,9 @@
 """
-Retrieval Service - Semantische Vektorsuche mit Reranking.
+Retrieval Service - Semantische Vektorsuche mit Cross-Encoder Reranking.
 
 Sucht nur in Collections, auf die der Benutzer Zugriff hat.
-Verwendet pgvector für semantische Ähnlichkeitssuche.
+Verwendet pgvector für semantische Ähnlichkeitssuche und FlashRank
+als Cross-Encoder für Reranking.
 """
 
 import logging
@@ -18,7 +19,28 @@ from app.services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
-# ── Keyword reranking helpers ────────────────────────────────────────────────
+# ── Cross-encoder singleton ──────────────────────────────────────────────────
+
+_ranker = None
+
+
+def _get_ranker():
+    """Lazy-load the FlashRank cross-encoder (singleton, ~34 MB on first call)."""
+    global _ranker
+    if _ranker is None:
+        try:
+            from flashrank import Ranker
+
+            model = settings.retrieval.rerank_model
+            logger.info(f"Loading FlashRank cross-encoder: {model}")
+            _ranker = Ranker(model_name=model, cache_dir="/tmp/flashrank")
+            logger.info("FlashRank cross-encoder loaded successfully")
+        except Exception as exc:
+            logger.warning(f"FlashRank not available ({exc}), falling back to keyword reranker")
+    return _ranker
+
+
+# ── Keyword reranking fallback ───────────────────────────────────────────────
 
 _SPLIT_RE = re.compile(r"[^\w]+", re.UNICODE)
 
@@ -36,16 +58,14 @@ def _keyword_score(query_tokens: list[str], chunk_tokens: list[str]) -> float:
     query_set = set(query_tokens)
     chunk_set = set(chunk_tokens)
 
-    # Jaccard similarity
     intersection = query_set & chunk_set
     if not intersection:
         return 0.0
     jaccard = len(intersection) / len(query_set | chunk_set)
 
-    # Term-frequency boost: fraction of query tokens that appear in chunk
     chunk_counter = Counter(chunk_tokens)
     tf_hits = sum(min(chunk_counter[t], 3) for t in query_tokens if t in chunk_counter)
-    tf_score = tf_hits / (len(query_tokens) * 3)  # normalise to [0, 1]
+    tf_score = tf_hits / (len(query_tokens) * 3)
 
     return 0.5 * jaccard + 0.5 * tf_score
 
@@ -161,17 +181,55 @@ class RetrievalService:
 
     async def _rerank(self, query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:
         """
-        Rerank results by blending vector similarity with keyword overlap.
+        Rerank with FlashRank cross-encoder, falling back to keyword scoring.
 
-        Combined score = α * similarity + (1-α) * keyword_score
-        where α = 0.7 (semantic weight).  This penalises chunks that match
-        semantically but share no surface-level terms with the query, and
-        rewards chunks that have both high semantic and lexical overlap.
+        FlashRank uses an ONNX cross-encoder (ms-marco-MiniLM-L-12-v2 by default)
+        that scores each (query, passage) pair with full token-level attention —
+        much more accurate than cosine similarity alone.
         """
         if not results:
             return results
 
-        alpha = 0.7  # weight for vector similarity
+        ranker = _get_ranker()
+        if ranker is not None:
+            return self._cross_encoder_rerank(ranker, query, results)
+        return self._keyword_rerank(query, results)
+
+    def _cross_encoder_rerank(
+        self, ranker, query: str, results: list[RetrievalResult],
+    ) -> list[RetrievalResult]:
+        """Rerank using FlashRank cross-encoder."""
+        from flashrank import RerankRequest
+
+        passages = [
+            {"id": idx, "text": r.content}
+            for idx, r in enumerate(results)
+        ]
+
+        rerank_request = RerankRequest(query=query, passages=passages)
+        ranked = ranker.rerank(rerank_request)
+
+        # Map back to RetrievalResult objects, update similarity_score
+        idx_to_result = {idx: r for idx, r in enumerate(results)}
+        reranked: list[RetrievalResult] = []
+        for item in ranked:
+            idx = item["id"]
+            r = idx_to_result[idx]
+            r.similarity_score = float(item["score"])
+            reranked.append(r)
+
+        if logger.isEnabledFor(logging.DEBUG):
+            for rank, r in enumerate(reranked, 1):
+                logger.debug(
+                    f"CrossEncoder #{rank}: score={r.similarity_score:.4f} "
+                    f"doc={r.document_name} chunk={r.chunk_id}"
+                )
+
+        return reranked
+
+    def _keyword_rerank(self, query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:
+        """Fallback: blend vector similarity with keyword overlap."""
+        alpha = 0.7
         query_tokens = _tokenize(query)
 
         scored: list[tuple[float, RetrievalResult]] = []
