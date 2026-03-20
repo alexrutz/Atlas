@@ -56,7 +56,7 @@ async def seed_admin_user():
                 is_admin=True,
                 is_active=True,
             )
-            .on_conflict_do_nothing(index_elements=["username"])
+            .on_conflict_do_nothing()
             .returning(User.id)
         )
         result = await session.execute(stmt)
