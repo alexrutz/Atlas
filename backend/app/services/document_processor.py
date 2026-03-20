@@ -3,6 +3,7 @@ Document Processor - Parsing und Chunking von Dokumenten.
 
 Unterstützt verschiedene Dateiformate und Chunking-Strategien.
 Chunks werden direkt mit ihrem Originaltext embedded.
+Scanned-PDF OCR nutzt Qianfan-OCR VLM mit Layout-as-thought (konfigurierbar).
 """
 
 import logging
@@ -15,7 +16,7 @@ from app.core.config import settings
 from app.models.document import Document
 from app.models.chunk import Chunk
 from app.services.embedding_service import EmbeddingService
-from app.utils.file_parsers import parse_document
+from app.utils.file_parsers import parse_document, ParsedDocument
 from app.utils.text_processing import chunk_text
 
 logger = logging.getLogger(__name__)
@@ -28,13 +29,42 @@ class DocumentProcessor:
         self.db = db
         self.embedding = EmbeddingService()
 
+    async def _parse_with_vlm_ocr_fallback(self, file_path: str, file_type: str) -> ParsedDocument:
+        """Parst ein Dokument. Bei PDFs ohne Text wird VLM-OCR direkt async aufgerufen."""
+        parsed = parse_document(file_path, file_type)
+
+        # Wenn Text vorhanden oder kein PDF → normales Ergebnis
+        if parsed.text.strip() or file_type.lower() != ".pdf":
+            return parsed
+
+        # PDF ohne Text: VLM-OCR direkt im async-Kontext aufrufen
+        if not settings.documents.ocr_enabled:
+            logger.warning(f"Kein Text in PDF und OCR deaktiviert: {file_path}")
+            return parsed
+
+        backend = getattr(settings.documents, "ocr_backend", "tesseract")
+        if backend == "vlm" and settings.vlm_ocr.enabled:
+            logger.info(f"VLM-OCR (Layout-as-thought) für: {file_path}")
+            from app.services.vlm_ocr_service import VlmOcrService
+            vlm = VlmOcrService()
+            sections, texts = await vlm.ocr_pdf_pages(file_path)
+            if texts:
+                return ParsedDocument(
+                    text="\n\n".join(texts),
+                    sections=sections,
+                    page_count=parsed.page_count,
+                )
+            logger.warning(f"VLM-OCR konnte keinen Text extrahieren: {file_path}")
+
+        return parsed
+
     async def process(self, document_id: int) -> None:
         """
         Vollständige Verarbeitung eines Dokuments.
 
         Ablauf:
         1. Dokument aus DB laden
-        2. Datei parsen (Text extrahieren)
+        2. Datei parsen (Text extrahieren, ggf. VLM-OCR)
         3. Text in Chunks aufteilen
         4. Embedding für jeden Chunk berechnen
         5. Chunks mit Embeddings in DB speichern
@@ -51,9 +81,11 @@ class DocumentProcessor:
             document.processing_status = "processing"
             await self.db.flush()
 
-            # 2. Datei parsen
+            # 2. Datei parsen (mit VLM-OCR Fallback für scanned PDFs)
             logger.info(f"Parse Dokument: {document.original_name}")
-            parsed = parse_document(document.file_path, document.file_type)
+            parsed = await self._parse_with_vlm_ocr_fallback(
+                document.file_path, document.file_type
+            )
 
             # 3. Text in Chunks aufteilen
             logger.info(f"Chunking mit Strategie: {settings.chunking.strategy}")

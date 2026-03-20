@@ -66,13 +66,14 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # llama.cpp - Embedding Server
+  # llama.cpp - Embedding Server (+ VLM OCR with Layout-as-thought)
   # Configure via .env: EMBED_MODEL, EMBED_CTX_SIZE, EMBED_EXTRA_ARGS
   # Available models (GGUF files must be in ../models):
-  #   pplx-embed-context-v1-0.6b-q8_0.gguf   (default embedding model)
+  #   Qianfan-OCR-Q8_0.gguf                   (default, 4B VLM, Layout-as-thought OCR
+  #                                             + mmproj-Qianfan-OCR-Q8_0.gguf)
+  #   pplx-embed-context-v1-0.6b-q8_0.gguf    (text-only, 1024-dim)
   #   GLM-OCR-Q8_0.gguf                       (+ mmproj-GLM-OCR-Q8_0.gguf)
   #   PaddleOCR-VL-1.5-Q8_0.gguf              (+ PaddleOCR-VL-1.5-mmproj.gguf)
-  #   Qianfan-OCR-Q8_0.gguf                   (+ mmproj-Qianfan-OCR-Q8_0.gguf)
   # ---------------------------------------------------------------------------
   llama-cpp-embed:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda

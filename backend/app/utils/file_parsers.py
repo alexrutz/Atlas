@@ -84,7 +84,15 @@ def _parse_pdf(file_path: str) -> ParsedDocument:
         from app.core.config import settings
         if settings.documents.ocr_enabled:
             logger.info(f"Kein Text in PDF gefunden, starte OCR für: {file_path}")
-            ocr_sections, ocr_text = _ocr_pdf(file_path, settings.documents.ocr_language)
+
+            backend = getattr(settings.documents, "ocr_backend", "tesseract")
+            if backend == "vlm" and settings.vlm_ocr.enabled:
+                # VLM-OCR mit Layout-as-thought (Qianfan-OCR)
+                ocr_sections, ocr_text = _vlm_ocr_pdf(file_path)
+            else:
+                # Legacy Tesseract-OCR
+                ocr_sections, ocr_text = _ocr_pdf(file_path, settings.documents.ocr_language)
+
             if ocr_text:
                 return ParsedDocument(
                     text="\n\n".join(ocr_text),
@@ -162,6 +170,38 @@ def _ocr_pdf(file_path: str, ocr_language: str = "deu+eng") -> tuple[list[Parsed
         logger.error(f"OCR-Fehler: {e}")
 
     return sections, full_text
+
+
+def _vlm_ocr_pdf(file_path: str) -> tuple[list[ParsedSection], list[str]]:
+    """Führt VLM-OCR (Layout-as-thought) auf allen Seiten eines PDFs durch.
+
+    Verwendet den VlmOcrService asynchron. Da file_parsers synchron aufgerufen
+    wird, wird ein neuer Event-Loop gestartet falls nötig.
+    """
+    import asyncio
+
+    try:
+        from app.services.vlm_ocr_service import VlmOcrService
+        service = VlmOcrService()
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # Bereits in einem async-Kontext → neuen Thread nutzen
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, service.ocr_pdf_pages(file_path))
+                return future.result()
+        else:
+            return asyncio.run(service.ocr_pdf_pages(file_path))
+
+    except Exception as e:
+        logger.error(f"VLM-OCR fehlgeschlagen, Fallback auf Tesseract: {e}")
+        from app.core.config import settings
+        return _ocr_pdf(file_path, settings.documents.ocr_language)
 
 
 def _parse_docx(file_path: str) -> ParsedDocument:

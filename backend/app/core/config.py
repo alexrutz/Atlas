@@ -88,10 +88,28 @@ class LLMConfig(BaseModel):
 
 class EmbeddingConfig(BaseModel):
     base_url: str = "http://llama-cpp-embed:8081"
-    model: str = "pplx-embed-context-v1-0.6b-q8_0.gguf"
+    model: str = "Qianfan-OCR-Q8_0.gguf"
     batch_size: int = 32
     max_retries: int = 3
     timeout: int = 60
+
+
+class VlmOcrConfig(BaseModel):
+    enabled: bool = True
+    base_url: str = "http://llama-cpp-embed:8081"
+    timeout: int = 120
+    max_image_size_px: int = 2048
+    dpi: int = 300
+    layout_as_thought: bool = True
+    system_prompt: str = (
+        "You are a precise document OCR engine with Layout-as-thought reasoning.\n"
+        "First, analyze the spatial layout of the page: identify columns, headers,\n"
+        "footers, tables, lists, captions, and reading order.\n"
+        "Then, extract ALL text faithfully in logical reading order.\n"
+        "Preserve paragraph breaks and structural hierarchy.\n"
+        "For tables, render them in markdown table format.\n"
+        "Output ONLY the extracted document text — no commentary."
+    )
 
 
 class ChunkingConfig(BaseModel):
@@ -128,6 +146,7 @@ class DocumentsConfig(BaseModel):
     max_file_size_mb: int = 100
     ocr_enabled: bool = True
     ocr_language: str = "deu+eng"
+    ocr_backend: str = "vlm"  # "vlm" (Qianfan-OCR) or "tesseract" (legacy)
     temp_upload_dir: str = "/tmp/atlas_uploads"
 
 
@@ -156,6 +175,7 @@ class Settings(BaseModel):
     vector: VectorConfig = VectorConfig()
     llm: LLMConfig = LLMConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
+    vlm_ocr: VlmOcrConfig = VlmOcrConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
     documents: DocumentsConfig = DocumentsConfig()

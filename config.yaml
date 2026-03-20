@@ -80,10 +80,33 @@ llm:
 # -----------------------------------------------------------------------------
 embedding:
   base_url: "http://llama-cpp-embed:8081"
-  model: "pplx-embed-context-v1-0.6b-q8_0.gguf"
+  model: "Qianfan-OCR-Q8_0.gguf"
   batch_size: 32
   max_retries: 3
   timeout: 60
+
+# -----------------------------------------------------------------------------
+# VLM-OCR-Konfiguration (Vision-Language Model für OCR)
+# Verwendet den Embedding-Server im Completion-Modus für Layout-aware OCR.
+# Aktiviert "Layout-as-thought": Das Modell analysiert erst die Seitenstruktur
+# (Überschriften, Tabellen, Spalten, Listen) und extrahiert dann den Text
+# in logischer Lesereihenfolge.
+# -----------------------------------------------------------------------------
+vlm_ocr:
+  enabled: true
+  base_url: "http://llama-cpp-embed:8081"
+  timeout: 120
+  max_image_size_px: 2048
+  dpi: 300
+  layout_as_thought: true
+  system_prompt: |
+    You are a precise document OCR engine with Layout-as-thought reasoning.
+    First, analyze the spatial layout of the page: identify columns, headers,
+    footers, tables, lists, captions, and reading order.
+    Then, extract ALL text faithfully in logical reading order.
+    Preserve paragraph breaks and structural hierarchy.
+    For tables, render them in markdown table format.
+    Output ONLY the extracted document text — no commentary.
 
 # -----------------------------------------------------------------------------
 # Dokument-Verarbeitung (Chunking)
@@ -134,6 +157,7 @@ documents:
   max_file_size_mb: 100
   ocr_enabled: true
   ocr_language: "deu+eng"
+  ocr_backend: "vlm"           # "vlm" (Qianfan-OCR) or "tesseract" (legacy)
   temp_upload_dir: "/tmp/atlas_uploads"
 
 # -----------------------------------------------------------------------------
