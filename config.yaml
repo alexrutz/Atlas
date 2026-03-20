@@ -106,9 +106,9 @@ chunking:
 retrieval:
   top_k: 10
   rerank: true
-  rerank_model: "cross-encoder"
+  rerank_model: "ms-marco-MiniLM-L-12-v2"
   rerank_top_k: 5
-  similarity_threshold: 0.0    # Post-query filter disabled; set > 0 to drop low-scoring results
+  similarity_threshold: 0.3    # Drop chunks below this cosine similarity score
   hybrid_search: false          # Deprecated - pure vector search is used
   hybrid_alpha: 0.7             # Deprecated - ignored
   query_enrichment:

@@ -147,7 +147,13 @@ def log_free_chat_stream_complete(
 
 
 def setup_diagnostic_logging(log_path: str = "/app/logs/llm_diagnostic.log") -> None:
-    """Set up the diagnostic logger to write to a dedicated file."""
+    """Set up the diagnostic logger to write to a dedicated file only.
+
+    The sidecar container (llm-diagnostic) tails this file.  We intentionally
+    do NOT add a stderr handler here so that the same diagnostic output does
+    not appear in *both* ``docker compose logs backend`` and
+    ``docker compose logs llm-diagnostic``.
+    """
     import os
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
@@ -155,14 +161,8 @@ def setup_diagnostic_logging(log_path: str = "/app/logs/llm_diagnostic.log") -> 
     diag.setLevel(logging.DEBUG)
     diag.propagate = False
 
-    # File handler for the sidecar to tail
+    # Only write to the file — the sidecar container tails it
     fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter("%(message)s"))
     diag.addHandler(fh)
-
-    # Also log to stderr so it shows in `docker compose logs backend`
-    sh = logging.StreamHandler()
-    sh.setLevel(logging.DEBUG)
-    sh.setFormatter(logging.Formatter("%(message)s"))
-    diag.addHandler(sh)

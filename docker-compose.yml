@@ -32,6 +32,7 @@ services:
 
   # ---------------------------------------------------------------------------
   # llama.cpp - LLM Server (OpenAI-kompatible API)
+  # Configure via .env: LLM_MODEL, LLM_CTX_SIZE, LLM_PREDICT
   # ---------------------------------------------------------------------------
   llama-cpp:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -44,9 +45,9 @@ services:
     command: >
       --host 0.0.0.0
       --port 8080
-      --model /models/Qwen3.5-35B-A3B-UD-IQ3_S.gguf
-      --ctx-size 65536
-      --n-predict 65536
+      --model /models/${LLM_MODEL}
+      --ctx-size ${LLM_CTX_SIZE:-65536}
+      --n-predict ${LLM_PREDICT:-65536}
       --n-gpu-layers 99
       --jinja
     deploy:
@@ -66,6 +67,12 @@ services:
 
   # ---------------------------------------------------------------------------
   # llama.cpp - Embedding Server
+  # Configure via .env: EMBED_MODEL, EMBED_CTX_SIZE, EMBED_EXTRA_ARGS
+  # Available models (GGUF files must be in ../models):
+  #   pplx-embed-context-v1-0.6b-q8_0.gguf   (default embedding model)
+  #   GLM-OCR-Q8_0.gguf                       (+ mmproj-GLM-OCR-Q8_0.gguf)
+  #   PaddleOCR-VL-1.5-Q8_0.gguf              (+ PaddleOCR-VL-1.5-mmproj.gguf)
+  #   Qianfan-OCR-Q8_0.gguf                   (+ mmproj-Qianfan-OCR-Q8_0.gguf)
   # ---------------------------------------------------------------------------
   llama-cpp-embed:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -75,15 +82,19 @@ services:
       - "8081:8081"
     volumes:
       - ../models:/models:ro
-    command: >
-      --host 0.0.0.0
-      --port 8081
-      --model /models/pplx-embed-context-v1-0.6b-q8_0.gguf
-      --ctx-size 32768
-      --batch-size 32768
-      --ubatch-size 32768
-      --n-gpu-layers 99
-      --embedding
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        exec llama-server \
+          --host 0.0.0.0 \
+          --port 8081 \
+          --model /models/${EMBED_MODEL} \
+          --ctx-size ${EMBED_CTX_SIZE:-32768} \
+          --batch-size ${EMBED_CTX_SIZE:-32768} \
+          --ubatch-size ${EMBED_CTX_SIZE:-32768} \
+          --n-gpu-layers 99 \
+          --embedding \
+          ${EMBED_EXTRA_ARGS}
     deploy:
       resources:
         reservations:

@@ -66,13 +66,6 @@ class LLMService:
         }
         logger.info(f"generate: enable_thinking={enable_thinking}")
 
-        # Diagnostic: log input
-        log_rag_call(
-            system_prompt=system,
-            user_prompt=prompt,
-            enable_thinking=enable_thinking,
-        )
-
         try:
             async with httpx.AsyncClient(timeout=600.0) as client:
                 response = await client.post(
@@ -87,7 +80,7 @@ class LLMService:
                     "thinking": choice.get("reasoning_content", ""),
                 }
 
-                # Diagnostic: log output
+                # Diagnostic: single log entry with both input and output
                 log_rag_call(
                     system_prompt=system,
                     user_prompt=prompt,
@@ -187,13 +180,6 @@ class LLMService:
             "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
         }
 
-        # Diagnostic: log enrichment input
-        log_enrichment_call(
-            system_prompt=system,
-            user_prompt=prompt,
-            output="(calling...)",
-        )
-
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout) as client:
                 response = await client.post(
@@ -204,7 +190,7 @@ class LLMService:
                 data = response.json()
                 result = data["choices"][0]["message"].get("content", "").strip()
 
-                # Diagnostic: log enrichment output
+                # Diagnostic: single log entry with input and output
                 log_enrichment_call(
                     system_prompt=system,
                     user_prompt=prompt,
