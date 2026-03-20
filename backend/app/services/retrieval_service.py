@@ -6,6 +6,8 @@ Verwendet pgvector für semantische Ähnlichkeitssuche.
 """
 
 import logging
+import re
+from collections import Counter
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +17,37 @@ from app.core.config import settings
 from app.services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
+
+# ── Keyword reranking helpers ────────────────────────────────────────────────
+
+_SPLIT_RE = re.compile(r"[^\w]+", re.UNICODE)
+
+
+def _tokenize(text_str: str) -> list[str]:
+    """Lower-case unicode-aware tokenisation."""
+    return [t for t in _SPLIT_RE.split(text_str.lower()) if len(t) > 1]
+
+
+def _keyword_score(query_tokens: list[str], chunk_tokens: list[str]) -> float:
+    """Combined Jaccard + term-frequency keyword overlap score in [0, 1]."""
+    if not query_tokens or not chunk_tokens:
+        return 0.0
+
+    query_set = set(query_tokens)
+    chunk_set = set(chunk_tokens)
+
+    # Jaccard similarity
+    intersection = query_set & chunk_set
+    if not intersection:
+        return 0.0
+    jaccard = len(intersection) / len(query_set | chunk_set)
+
+    # Term-frequency boost: fraction of query tokens that appear in chunk
+    chunk_counter = Counter(chunk_tokens)
+    tf_hits = sum(min(chunk_counter[t], 3) for t in query_tokens if t in chunk_counter)
+    tf_score = tf_hits / (len(query_tokens) * 3)  # normalise to [0, 1]
+
+    return 0.5 * jaccard + 0.5 * tf_score
 
 
 @dataclass
@@ -128,13 +161,34 @@ class RetrievalService:
 
     async def _rerank(self, query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:
         """
-        Reranking der Suchergebnisse.
+        Rerank results by blending vector similarity with keyword overlap.
 
-        Stub: Hier kann ein Cross-Encoder oder LLM-basiertes Reranking implementiert werden.
-        Aktuell wird die bestehende Sortierung beibehalten.
+        Combined score = α * similarity + (1-α) * keyword_score
+        where α = 0.7 (semantic weight).  This penalises chunks that match
+        semantically but share no surface-level terms with the query, and
+        rewards chunks that have both high semantic and lexical overlap.
         """
-        # TODO: Implementierung mit Cross-Encoder Modell
-        # Optionen:
-        # - cross-encoder/ms-marco-MiniLM-L-6-v2 (via sentence-transformers)
-        # - LLM-basiertes Reranking über llama.cpp
-        return sorted(results, key=lambda r: r.similarity_score, reverse=True)
+        if not results:
+            return results
+
+        alpha = 0.7  # weight for vector similarity
+        query_tokens = _tokenize(query)
+
+        scored: list[tuple[float, RetrievalResult]] = []
+        for r in results:
+            chunk_tokens = _tokenize(r.content)
+            kw = _keyword_score(query_tokens, chunk_tokens)
+            combined = alpha * r.similarity_score + (1 - alpha) * kw
+            scored.append((combined, r))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        if logger.isEnabledFor(logging.DEBUG):
+            for rank, (score, r) in enumerate(scored, 1):
+                logger.debug(
+                    f"Rerank #{rank}: combined={score:.3f} "
+                    f"(sim={r.similarity_score:.3f}, kw={score - alpha * r.similarity_score:.3f}) "
+                    f"doc={r.document_name} chunk={r.chunk_id}"
+                )
+
+        return [r for _, r in scored]

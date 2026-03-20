@@ -117,7 +117,7 @@ class RetrievalConfig(BaseModel):
     rerank: bool = True
     rerank_model: str = "cross-encoder"
     rerank_top_k: int = 5
-    similarity_threshold: float = 0.0  # Post-query filter (0.0 = disabled)
+    similarity_threshold: float = 0.3  # Drop chunks below this cosine similarity
     hybrid_search: bool = False  # Deprecated, ignored — pure vector search is used
     hybrid_alpha: float = 0.7  # Deprecated, ignored
     query_enrichment: QueryEnrichmentConfig = QueryEnrichmentConfig()
