@@ -40,10 +40,6 @@ class DatabaseConfig(BaseModel):
     def async_url(self) -> str:
         return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
 
-    @property
-    def sync_url(self) -> str:
-        return f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
-
 
 class VectorConfig(BaseModel):
     dimensions: int = 1024
@@ -137,8 +133,6 @@ class RetrievalConfig(BaseModel):
     rerank_model: str = "ms-marco-MiniLM-L-12-v2"
     rerank_top_k: int = 5
     similarity_threshold: float = 0.3  # Drop chunks below this cosine similarity
-    hybrid_search: bool = False  # Deprecated, ignored — pure vector search is used
-    hybrid_alpha: float = 0.7  # Deprecated, ignored
     query_enrichment: QueryEnrichmentConfig = QueryEnrichmentConfig()
 
 

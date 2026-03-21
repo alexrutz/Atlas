@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
-from app.core.config import settings, get_settings
+from app.core.dependencies import get_current_user, require_admin
+from app.core.config import settings
 from app.models.user import User
 from app.models.system_setting import SystemSetting
 
@@ -103,18 +103,12 @@ class PromptsUpdate(BaseModel):
     free_chat_system_prompt: str
 
 
-def _require_admin(user: User):
-    if not user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
-
-
 @router.get("/prompts", response_model=PromptsResponse)
 async def get_prompts(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Get current prompts. Returns DB overrides if they exist, otherwise config.yaml defaults."""
-    _require_admin(current_user)
     prompts = {}
     for key in PROMPT_KEYS:
         result = await db.execute(
@@ -131,11 +125,10 @@ async def get_prompts(
 @router.put("/prompts", response_model=PromptsResponse)
 async def update_prompts(
     data: PromptsUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Update prompts. Saves to DB and updates the running config in-memory."""
-    _require_admin(current_user)
 
     updates = {
         "system_prompt": data.system_prompt,

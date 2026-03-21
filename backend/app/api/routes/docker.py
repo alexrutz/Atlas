@@ -8,7 +8,7 @@ from docker.errors import APIError, NotFound
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import require_admin
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ COMPOSE_CONTAINER_NAMES = {
     "atlas-postgres",
     "atlas-llama-cpp",
     "atlas-llama-cpp-embed",
+    "atlas-llama-cpp-vlm",
     "atlas-backend",
     "atlas-llm-diagnostic",
     "atlas-frontend",
@@ -35,14 +36,6 @@ def get_docker_client():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Docker-Daemon nicht erreichbar.",
-        )
-
-
-def require_admin(user: User):
-    if not user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Nur Admins können Docker verwalten.",
         )
 
 
@@ -83,9 +76,8 @@ class BulkActionResponse(BaseModel):
 # --- Containers ---
 
 @router.get("/containers", response_model=list[ContainerInfo])
-async def list_containers(current_user: User = Depends(get_current_user)):
+async def list_containers(current_user: User = Depends(require_admin)):
     """Alle Docker-Container auflisten."""
-    require_admin(current_user)
     client = get_docker_client()
 
     containers = []
@@ -115,10 +107,9 @@ async def list_containers(current_user: User = Depends(get_current_user)):
 @router.post("/containers/restart", response_model=BulkActionResponse)
 async def restart_containers(
     data: BulkActionRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """Einen oder mehrere Container neustarten."""
-    require_admin(current_user)
     client = get_docker_client()
     results = []
 
@@ -140,9 +131,8 @@ async def restart_containers(
 # --- Images ---
 
 @router.get("/images", response_model=list[ImageInfo])
-async def list_images(current_user: User = Depends(get_current_user)):
+async def list_images(current_user: User = Depends(require_admin)):
     """Alle Docker-Images auflisten."""
-    require_admin(current_user)
     client = get_docker_client()
 
     # Collect image IDs used by compose containers
@@ -169,10 +159,9 @@ async def list_images(current_user: User = Depends(get_current_user)):
 @router.post("/images/rebuild", response_model=BulkActionResponse)
 async def rebuild_images(
     data: BulkActionRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """Images neu bauen und zugehörige Container neustarten."""
-    require_admin(current_user)
     client = get_docker_client()
     results = []
 
@@ -218,9 +207,8 @@ async def rebuild_images(
 # --- Volumes ---
 
 @router.get("/volumes", response_model=list[VolumeInfo])
-async def list_volumes(current_user: User = Depends(get_current_user)):
+async def list_volumes(current_user: User = Depends(require_admin)):
     """Alle Docker-Volumes auflisten."""
-    require_admin(current_user)
     client = get_docker_client()
 
     volumes = []
@@ -243,10 +231,9 @@ async def list_volumes(current_user: User = Depends(get_current_user)):
 @router.post("/volumes/delete", response_model=BulkActionResponse)
 async def delete_volumes(
     data: BulkActionRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """Einen oder mehrere Volumes löschen."""
-    require_admin(current_user)
     client = get_docker_client()
     results = []
 
