@@ -88,7 +88,7 @@ class VlmOcrService:
         system_prompt = self._build_system_prompt()
 
         payload = {
-            "model": settings.embedding.model,
+            "model": self.config.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {

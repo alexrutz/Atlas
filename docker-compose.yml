@@ -66,14 +66,8 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # llama.cpp - Embedding Server (+ VLM OCR with Layout-as-thought)
-  # Configure via .env: EMBED_MODEL, EMBED_CTX_SIZE, EMBED_EXTRA_ARGS
-  # Available models (GGUF files must be in ../models):
-  #   Qianfan-OCR-Q8_0.gguf                   (default, 4B VLM, Layout-as-thought OCR
-  #                                             + mmproj-Qianfan-OCR-Q8_0.gguf)
-  #   pplx-embed-context-v1-0.6b-q8_0.gguf    (text-only, 1024-dim)
-  #   GLM-OCR-Q8_0.gguf                       (+ mmproj-GLM-OCR-Q8_0.gguf)
-  #   PaddleOCR-VL-1.5-Q8_0.gguf              (+ PaddleOCR-VL-1.5-mmproj.gguf)
+  # llama.cpp - Embedding Server (text → vectors)
+  # Configure via .env: EMBED_MODEL, EMBED_CTX_SIZE
   # ---------------------------------------------------------------------------
   llama-cpp-embed:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -92,7 +86,6 @@ services:
       --ubatch-size ${EMBED_CTX_SIZE:-32768}
       --n-gpu-layers 99
       --embedding
-      ${EMBED_EXTRA_ARGS}
     deploy:
       resources:
         reservations:
@@ -102,6 +95,44 @@ services:
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
+  # llama.cpp - VLM OCR Server (images → structured text)
+  # Configure via .env: VLM_MODEL, VLM_CTX_SIZE, VLM_EXTRA_ARGS
+  # Available VLM models (GGUF files must be in ../models):
+  #   Qianfan-OCR-Q8_0.gguf      (4B, Layout-as-thought, + mmproj-Qianfan-OCR-Q8_0.gguf)
+  #   GLM-OCR-Q8_0.gguf          (0.9B, + mmproj-GLM-OCR-Q8_0.gguf)
+  #   PaddleOCR-VL-1.5-Q8_0.gguf (0.5B, + PaddleOCR-VL-1.5-mmproj.gguf)
+  # ---------------------------------------------------------------------------
+  llama-cpp-vlm:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: atlas-llama-cpp-vlm
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    volumes:
+      - ../models:/models:ro
+    command: >
+      --host 0.0.0.0
+      --port 8082
+      --model /models/${VLM_MODEL}
+      --ctx-size ${VLM_CTX_SIZE:-32768}
+      --n-gpu-layers 99
+      ${VLM_EXTRA_ARGS}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -134,6 +165,8 @@ services:
       llama-cpp:
         condition: service_healthy
       llama-cpp-embed:
+        condition: service_healthy
+      llama-cpp-vlm:
         condition: service_healthy
     networks:
       - atlas-network

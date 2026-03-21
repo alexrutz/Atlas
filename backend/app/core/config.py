@@ -88,7 +88,7 @@ class LLMConfig(BaseModel):
 
 class EmbeddingConfig(BaseModel):
     base_url: str = "http://llama-cpp-embed:8081"
-    model: str = "Qianfan-OCR-Q8_0.gguf"
+    model: str = "pplx-embed-context-v1-0.6b-q8_0.gguf"
     batch_size: int = 32
     max_retries: int = 3
     timeout: int = 60
@@ -96,7 +96,8 @@ class EmbeddingConfig(BaseModel):
 
 class VlmOcrConfig(BaseModel):
     enabled: bool = True
-    base_url: str = "http://llama-cpp-embed:8081"
+    base_url: str = "http://llama-cpp-vlm:8082"
+    model: str = "Qianfan-OCR-Q8_0.gguf"
     timeout: int = 120
     max_image_size_px: int = 2048
     dpi: int = 300

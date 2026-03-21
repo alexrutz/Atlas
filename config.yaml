@@ -80,7 +80,7 @@ llm:
 # -----------------------------------------------------------------------------
 embedding:
   base_url: "http://llama-cpp-embed:8081"
-  model: "Qianfan-OCR-Q8_0.gguf"
+  model: "pplx-embed-context-v1-0.6b-q8_0.gguf"
   batch_size: 32
   max_retries: 3
   timeout: 60
@@ -94,7 +94,8 @@ embedding:
 # -----------------------------------------------------------------------------
 vlm_ocr:
   enabled: true
-  base_url: "http://llama-cpp-embed:8081"
+  base_url: "http://llama-cpp-vlm:8082"
+  model: "Qianfan-OCR-Q8_0.gguf"
   timeout: 120
   max_image_size_px: 2048
   dpi: 300
