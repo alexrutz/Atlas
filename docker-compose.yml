@@ -66,11 +66,12 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # llama.cpp - Embedding Server (text → vectors)
+  # llama.cpp - Embedding Server (text → vectors, CPU-only)
+  # Runs on CPU to keep all VRAM available for the LLM.
   # Configure via .env: EMBED_MODEL, EMBED_CTX_SIZE
   # ---------------------------------------------------------------------------
   llama-cpp-embed:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server
     container_name: atlas-llama-cpp-embed
     restart: unless-stopped
     ports:
@@ -84,15 +85,8 @@ services:
       --ctx-size ${EMBED_CTX_SIZE:-32768}
       --batch-size ${EMBED_CTX_SIZE:-32768}
       --ubatch-size ${EMBED_CTX_SIZE:-32768}
-      --n-gpu-layers 99
+      --n-gpu-layers 0
       --embedding
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
@@ -102,7 +96,9 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # llama.cpp - VLM OCR Server (images → structured text)
+  # llama.cpp - VLM OCR Server (images → structured text, CPU-only)
+  # Runs on CPU to keep all VRAM available for the LLM.
+  # Ingestion is a background task so slower inference is acceptable.
   # Configure via .env: VLM_MODEL, VLM_CTX_SIZE, VLM_EXTRA_ARGS
   # Available VLM models (GGUF files must be in ../models):
   #   Qianfan-OCR-Q8_0.gguf      (4B, Layout-as-thought, + mmproj-Qianfan-OCR-Q8_0.gguf)
@@ -110,7 +106,7 @@ services:
   #   PaddleOCR-VL-1.5-Q8_0.gguf (0.5B, + PaddleOCR-VL-1.5-mmproj.gguf)
   # ---------------------------------------------------------------------------
   llama-cpp-vlm:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server
     container_name: atlas-llama-cpp-vlm
     restart: unless-stopped
     ports:
@@ -122,15 +118,8 @@ services:
       --port 8082
       --model /models/${VLM_MODEL}
       --ctx-size ${VLM_CTX_SIZE:-32768}
-      --n-gpu-layers 99
+      --n-gpu-layers 0
       ${VLM_EXTRA_ARGS}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
       interval: 30s

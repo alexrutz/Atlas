@@ -83,7 +83,7 @@ embedding:
   model: "pplx-embed-context-v1-0.6b-q8_0.gguf"
   batch_size: 32
   max_retries: 3
-  timeout: 60
+  timeout: 120  # Higher timeout — embedding runs on CPU
 
 # -----------------------------------------------------------------------------
 # VLM-OCR-Konfiguration (Vision-Language Model für OCR)
@@ -96,7 +96,7 @@ vlm_ocr:
   enabled: true
   base_url: "http://llama-cpp-vlm:8082"
   model: "Qianfan-OCR-Q8_0.gguf"
-  timeout: 120
+  timeout: 300  # Higher timeout — VLM runs on CPU, ingestion is a background task
   max_image_size_px: 2048
   dpi: 300
   layout_as_thought: true
