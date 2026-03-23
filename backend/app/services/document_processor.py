@@ -6,6 +6,7 @@ Chunks werden direkt mit ihrem Originaltext embedded.
 Scanned-PDF OCR nutzt Qianfan-OCR VLM mit Layout-as-thought (konfigurierbar).
 """
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -29,34 +30,14 @@ class DocumentProcessor:
         self.db = db
         self.embedding = EmbeddingService()
 
-    async def _parse_with_vlm_ocr_fallback(self, file_path: str, file_type: str) -> ParsedDocument:
-        """Parst ein Dokument. Bei PDFs ohne Text wird VLM-OCR direkt async aufgerufen."""
-        parsed = parse_document(file_path, file_type)
+    async def _parse(self, file_path: str, file_type: str) -> ParsedDocument:
+        """Parst ein Dokument ohne den Event-Loop zu blockieren.
 
-        # Wenn Text vorhanden oder kein PDF → normales Ergebnis
-        if parsed.text.strip() or file_type.lower() != ".pdf":
-            return parsed
-
-        # PDF ohne Text: VLM-OCR direkt im async-Kontext aufrufen
-        if not settings.documents.ocr_enabled:
-            logger.warning(f"Kein Text in PDF und OCR deaktiviert: {file_path}")
-            return parsed
-
-        backend = getattr(settings.documents, "ocr_backend", "tesseract")
-        if backend == "vlm" and settings.vlm_ocr.enabled:
-            logger.info(f"VLM-OCR (Layout-as-thought) für: {file_path}")
-            from app.services.vlm_ocr_service import VlmOcrService
-            vlm = VlmOcrService()
-            sections, texts = await vlm.ocr_pdf_pages(file_path)
-            if texts:
-                return ParsedDocument(
-                    text="\n\n".join(texts),
-                    sections=sections,
-                    page_count=parsed.page_count,
-                )
-            logger.warning(f"VLM-OCR konnte keinen Text extrahieren: {file_path}")
-
-        return parsed
+        parse_document kann über _vlm_ocr_pdf intern blocking I/O (ThreadPoolExecutor
+        + future.result()) ausführen. Deshalb wird es in einem Thread-Pool ausgeführt,
+        damit der Event-Loop für andere Requests frei bleibt.
+        """
+        return await asyncio.to_thread(parse_document, file_path, file_type)
 
     async def process(self, document_id: int) -> None:
         """
@@ -81,11 +62,9 @@ class DocumentProcessor:
             document.processing_status = "processing"
             await self.db.flush()
 
-            # 2. Datei parsen (mit VLM-OCR Fallback für scanned PDFs)
+            # 2. Datei parsen (non-blocking: offloaded to thread pool)
             logger.info(f"Parse Dokument: {document.original_name}")
-            parsed = await self._parse_with_vlm_ocr_fallback(
-                document.file_path, document.file_type
-            )
+            parsed = await self._parse(document.file_path, document.file_type)
 
             # 3. Text in Chunks aufteilen
             logger.info(f"Chunking mit Strategie: {settings.chunking.strategy}")
