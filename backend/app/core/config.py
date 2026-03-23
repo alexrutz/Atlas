@@ -95,6 +95,7 @@ class VlmOcrConfig(BaseModel):
     base_url: str = "http://llama-cpp-vlm:8082"
     model: str = "Qianfan-OCR-Q8_0.gguf"
     timeout: int = 600  # Read timeout in seconds — VLM generates ~13 tok/s on CPU
+    max_tokens: int = 16384  # Must be large enough for thinking + OCR output
     max_image_size_px: int = 2048
     dpi: int = 300
     layout_as_thought: bool = True

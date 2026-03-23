@@ -105,7 +105,7 @@ class VlmOcrService:
                     ],
                 },
             ],
-            "max_tokens": 4096,
+            "max_tokens": self.config.max_tokens,
             "temperature": 0.1,
         }
 
@@ -122,7 +122,16 @@ class VlmOcrService:
             response.raise_for_status()
             data = response.json()
 
-        text = data["choices"][0]["message"]["content"]
+        message = data["choices"][0]["message"]
+        text = message.get("content") or ""
+
+        # With peg-native chat format, the model may put layout analysis
+        # into reasoning_content (thinking tokens) and leave content empty
+        # if it hits max_tokens before reaching the extraction phase.
+        # Fall back to reasoning_content so we still capture the OCR text.
+        if not text.strip():
+            text = message.get("reasoning_content") or ""
+
         return text.strip()
 
     async def ocr_pdf_pages(self, file_path: str) -> tuple[list, list[str]]:
