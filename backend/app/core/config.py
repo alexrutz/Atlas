@@ -110,6 +110,21 @@ class VlmOcrConfig(BaseModel):
     )
 
 
+class DoclingConfig(BaseModel):
+    enabled: bool = True  # Use docling pipeline (false = legacy parsers)
+    # Pipeline options
+    do_ocr: bool = True
+    do_table_structure: bool = True
+    table_mode: str = "fast"  # "fast" or "accurate"
+    # Chunking
+    use_docling_chunker: bool = True  # Use HybridChunker (false = legacy chunking)
+    max_tokens: int = 512  # Token limit per chunk for HybridChunker
+    merge_peers: bool = True  # Merge undersized adjacent chunks with same headings
+    tokenizer: str = ""  # HuggingFace tokenizer name (empty = use embedding model name)
+    # GPU acceleration
+    accelerator_device: str = "auto"  # "auto", "cuda", "mps", "cpu"
+
+
 class ChunkingConfig(BaseModel):
     strategy: str = "semantic"
     chunk_size: int = 512
@@ -173,6 +188,7 @@ class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     vlm_ocr: VlmOcrConfig = VlmOcrConfig()
+    docling: DoclingConfig = DoclingConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
     documents: DocumentsConfig = DocumentsConfig()

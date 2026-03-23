@@ -112,7 +112,26 @@ vlm_ocr:
     Output ONLY the extracted document text — no commentary.
 
 # -----------------------------------------------------------------------------
-# Document Processing (Chunking)
+# Docling Pipeline (advanced document parsing & chunking)
+# When enabled, replaces legacy parsers with Docling's ML-powered pipeline:
+# - Layout analysis model (Heron) for page element detection
+# - TableFormer for table structure recognition
+# - HybridChunker for token-aware, structure-preserving chunking
+# Set enabled: false to fall back to legacy pypdf/python-docx parsers.
+# -----------------------------------------------------------------------------
+docling:
+  enabled: true
+  do_ocr: true
+  do_table_structure: true
+  table_mode: "fast"             # "fast" (default) or "accurate" (slower, better quality)
+  use_docling_chunker: true      # Use HybridChunker (false = legacy chunking strategies)
+  max_tokens: 512                # Token limit per chunk (aligned to embedding model)
+  merge_peers: true              # Merge undersized adjacent chunks with same headings
+  tokenizer: ""                  # HuggingFace tokenizer (empty = use embedding model name)
+  accelerator_device: "auto"     # "auto", "cuda", "mps", "cpu"
+
+# -----------------------------------------------------------------------------
+# Document Processing (Legacy Chunking - used when docling.use_docling_chunker is false)
 # -----------------------------------------------------------------------------
 chunking:
   strategy: "semantic"

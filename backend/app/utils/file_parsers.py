@@ -1,7 +1,13 @@
 """
-Datei-Parser für verschiedene Dokumentformate.
+Document parsers with Docling as primary pipeline and legacy fallback.
 
-Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, HTML
+Docling pipeline: ML-powered parsing with layout analysis, table structure
+recognition, and structural document representation (DoclingDocument).
+
+Legacy pipeline: pypdf, python-docx, openpyxl, python-pptx, beautifulsoup4.
+Activated when docling is disabled or as automatic fallback on error.
+
+Supported formats: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, HTML, XML, JSON
 """
 
 import logging
@@ -13,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ParsedSection:
-    """Ein Abschnitt aus einem geparsten Dokument."""
+    """A section from a parsed document."""
     header: str | None
     content: str
     page_number: int | None = None
@@ -21,312 +27,193 @@ class ParsedSection:
 
 @dataclass
 class ParsedDocument:
-    """Ergebnis des Dokument-Parsings."""
-    text: str                                  # Gesamter extrahierter Text
-    sections: list[ParsedSection] = field(default_factory=list)  # Erkannte Abschnitte
-    page_count: int | None = None              # Seitenanzahl (bei PDFs)
+    """Result of document parsing."""
+    text: str                                  # Full extracted text
+    sections: list[ParsedSection] = field(default_factory=list)
+    page_count: int | None = None
     metadata: dict = field(default_factory=dict)
+    # Docling-specific: the raw DoclingDocument for downstream chunking
+    docling_document: object | None = None
 
+
+# =============================================================================
+# Unified entry point
+# =============================================================================
 
 def parse_document(file_path: str, file_type: str) -> ParsedDocument:
     """
-    Parst ein Dokument und extrahiert den Text.
+    Parse a document, using Docling if enabled, with legacy fallback.
 
     Args:
-        file_path: Pfad zur Datei
-        file_type: Dateityp (z.B. '.pdf', '.docx')
+        file_path: Path to the file
+        file_type: File extension (e.g. '.pdf', '.docx')
 
     Returns:
-        ParsedDocument mit extrahiertem Text und Abschnitten
+        ParsedDocument with extracted text, sections, and optionally
+        the raw DoclingDocument for structure-aware chunking.
     """
-    parsers = {
-        ".pdf": _parse_pdf,
-        ".docx": _parse_docx,
-        ".doc": _parse_docx,
-        ".xlsx": _parse_xlsx,
-        ".xls": _parse_xlsx,
-        ".pptx": _parse_pptx,
-        ".txt": _parse_text,
-        ".md": _parse_text,
-        ".csv": _parse_csv,
-        ".html": _parse_html,
-        ".xml": _parse_html,
-        ".json": _parse_text,
-    }
-
-    parser = parsers.get(file_type.lower())
-    if not parser:
-        raise ValueError(f"Nicht unterstütztes Dateiformat: {file_type}")
-
-    return parser(file_path)
-
-
-def _parse_pdf(file_path: str) -> ParsedDocument:
-    """Parst ein PDF-Dokument.
-
-    Wenn vlm_always aktiviert ist, wird VLM-OCR für ALLE PDFs verwendet
-    (bessere Strukturerkennung bei Tabellen, Spalten, Überschriften).
-    Andernfalls wird VLM/Tesseract nur als Fallback für gescannte PDFs genutzt.
-    """
-    from pypdf import PdfReader
     from app.core.config import settings
 
-    reader = PdfReader(file_path)
-    page_count = len(reader.pages)
+    if settings.docling.enabled:
+        try:
+            return _parse_with_docling(file_path, file_type)
+        except Exception as e:
+            logger.warning(f"Docling parsing failed, falling back to legacy: {e}")
 
-    # --- VLM-always-Modus: VLM für alle PDFs (layout-aware Chunks) ---
-    use_vlm_always = (
-        settings.documents.vlm_always
-        and settings.documents.ocr_backend == "vlm"
-        and settings.vlm_ocr.enabled
+    return _parse_with_legacy(file_path, file_type)
+
+
+# =============================================================================
+# Docling pipeline
+# =============================================================================
+
+def _parse_with_docling(file_path: str, file_type: str) -> ParsedDocument:
+    """Parse a document using Docling's ML-powered pipeline."""
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
+    from docling.datamodel.base_models import InputFormat
+    from app.core.config import settings
+
+    cfg = settings.docling
+
+    # Configure pipeline options for PDFs
+    pipeline_opts = PdfPipelineOptions()
+    pipeline_opts.do_ocr = cfg.do_ocr
+    pipeline_opts.do_table_structure = cfg.do_table_structure
+    if cfg.table_mode == "accurate":
+        pipeline_opts.table_structure_options.mode = TableFormerMode.ACCURATE
+    else:
+        pipeline_opts.table_structure_options.mode = TableFormerMode.FAST
+
+    # Set accelerator device
+    if cfg.accelerator_device != "auto":
+        pipeline_opts.accelerator_options.device = cfg.accelerator_device
+
+    converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_opts),
+        }
     )
-    if use_vlm_always:
-        logger.info(f"VLM-always: Verarbeite PDF mit Layout-aware OCR: {file_path}")
-        vlm_sections, vlm_text = _vlm_ocr_pdf(file_path)
-        if vlm_text:
-            return ParsedDocument(
-                text="\n\n".join(vlm_text),
-                sections=vlm_sections,
-                page_count=page_count,
-            )
-        logger.warning(f"VLM-always lieferte keinen Text, Fallback auf pypdf: {file_path}")
 
-    # --- Standard-Modus: Text mit pypdf extrahieren ---
-    sections = []
-    full_text = []
+    logger.info(f"Docling: parsing {file_path} (type={file_type})")
+    result = converter.convert(file_path)
+    doc = result.document
 
-    for i, page in enumerate(reader.pages):
-        text = page.extract_text() or ""
-        if text.strip():
-            sections.append(ParsedSection(
-                header=None,
-                content=text,
-                page_number=i + 1,
-            ))
-            full_text.append(text)
+    # Export markdown for full text
+    md_text = doc.export_to_markdown()
 
-    # Wenn kein Text extrahiert wurde (z.B. gescannte Dokumente), OCR verwenden
-    if not full_text:
-        if settings.documents.ocr_enabled:
-            logger.info(f"Kein Text in PDF gefunden, starte OCR für: {file_path}")
+    # Build sections from the document tree
+    sections = _docling_doc_to_sections(doc)
 
-            backend = getattr(settings.documents, "ocr_backend", "tesseract")
-            if backend == "vlm" and settings.vlm_ocr.enabled:
-                ocr_sections, ocr_text = _vlm_ocr_pdf(file_path)
-            else:
-                ocr_sections, ocr_text = _ocr_pdf(file_path, settings.documents.ocr_language)
+    # Determine page count from provenance
+    page_count = _get_docling_page_count(doc)
 
-            if ocr_text:
-                return ParsedDocument(
-                    text="\n\n".join(ocr_text),
-                    sections=ocr_sections,
-                    page_count=page_count,
-                )
-            logger.warning(f"OCR konnte keinen Text extrahieren: {file_path}")
-        else:
-            logger.warning(f"Kein Text in PDF und OCR deaktiviert: {file_path}")
+    logger.info(
+        f"Docling: parsed {file_path} → {len(sections)} sections, "
+        f"{len(md_text)} chars, {page_count or '?'} pages"
+    )
 
     return ParsedDocument(
-        text="\n\n".join(full_text),
+        text=md_text,
         sections=sections,
         page_count=page_count,
+        metadata={"parser": "docling"},
+        docling_document=doc,
     )
 
 
-def _clean_ocr_text(text: str) -> str:
-    """Bereinigt OCR-Text von typischen Artefakten.
-
-    Entfernt:
-    - Zeilen die überwiegend aus Sonderzeichen bestehen
-    - Übermäßige Leerzeichen und Steuerzeichen
-    - Sehr kurze Zeilen die wahrscheinlich Rauschen sind
-    """
-    import re
-
-    lines = text.split("\n")
-    cleaned = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        # Anteil alphanumerischer Zeichen berechnen
-        alnum_count = sum(1 for c in line if c.isalnum())
-        if len(line) > 0 and alnum_count / len(line) < 0.3:
-            # Zeile besteht zu >70% aus Sonderzeichen → Rauschen
-            continue
-        if len(line) < 3:
-            continue
-        # Mehrfache Leerzeichen zusammenfassen
-        line = re.sub(r" {2,}", " ", line)
-        cleaned.append(line)
-
-    return "\n".join(cleaned)
-
-
-def _ocr_pdf(file_path: str, ocr_language: str = "deu+eng") -> tuple[list[ParsedSection], list[str]]:
-    """Führt OCR auf allen Seiten eines PDFs durch."""
-    try:
-        from pdf2image import convert_from_path
-        import pytesseract
-    except ImportError:
-        logger.error("pdf2image oder pytesseract nicht installiert, OCR nicht möglich")
-        return [], []
-
+def _docling_doc_to_sections(doc) -> list[ParsedSection]:
+    """Extract sections from a DoclingDocument's body tree."""
     sections = []
-    full_text = []
 
     try:
-        images = convert_from_path(file_path, dpi=300)
-        for i, image in enumerate(images):
-            raw_text = pytesseract.image_to_string(image, lang=ocr_language)
-            text = _clean_ocr_text(raw_text)
-            if text.strip() and len(text.strip()) >= 20:
-                sections.append(ParsedSection(
-                    header=None,
-                    content=text.strip(),
-                    page_number=i + 1,
-                ))
-                full_text.append(text.strip())
-            elif text.strip():
-                logger.debug(f"OCR-Seite {i+1} übersprungen (zu wenig brauchbarer Text: {len(text.strip())} Zeichen)")
+        for item, _level in doc.iterate_items():
+            text = ""
+            header = None
+            page_number = None
+
+            # Get text content
+            if hasattr(item, "text"):
+                text = item.text or ""
+            elif hasattr(item, "export_to_markdown"):
+                text = item.export_to_markdown()
+
+            if not text.strip():
+                continue
+
+            # Determine if this is a heading
+            item_type = getattr(item, "label", None) or type(item).__name__
+            if "heading" in str(item_type).lower():
+                header = text.strip()
+                continue  # Headings are context, not standalone sections
+
+            # Get page number from provenance
+            prov = getattr(item, "prov", None)
+            if prov and len(prov) > 0:
+                page_number = getattr(prov[0], "page_no", None)
+
+            # Get parent heading context
+            parent_headers = _get_parent_headings(doc, item)
+            if parent_headers:
+                header = " > ".join(parent_headers)
+
+            sections.append(ParsedSection(
+                header=header,
+                content=text.strip(),
+                page_number=page_number,
+            ))
     except Exception as e:
-        logger.error(f"OCR-Fehler: {e}")
+        logger.warning(f"Error extracting sections from DoclingDocument: {e}")
+        # Fallback: single section from markdown
+        md = doc.export_to_markdown()
+        if md.strip():
+            sections.append(ParsedSection(header=None, content=md.strip()))
 
-    return sections, full_text
+    return sections
 
 
-def _vlm_ocr_pdf(file_path: str) -> tuple[list[ParsedSection], list[str]]:
-    """Führt VLM-OCR (Layout-as-thought) auf allen Seiten eines PDFs durch.
-
-    Verwendet den VlmOcrService asynchron. Da file_parsers synchron aufgerufen
-    wird, wird ein neuer Event-Loop gestartet falls nötig.
-    """
-    import asyncio
-
+def _get_parent_headings(doc, item) -> list[str]:
+    """Walk up the document tree to collect parent heading texts."""
+    headings = []
     try:
-        from app.services.vlm_ocr_service import VlmOcrService
-        service = VlmOcrService()
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # Bereits in einem async-Kontext → neuen Thread nutzen
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, service.ocr_pdf_pages(file_path))
-                return future.result()
-        else:
-            return asyncio.run(service.ocr_pdf_pages(file_path))
-
-    except Exception as e:
-        logger.error(f"VLM-OCR fehlgeschlagen, Fallback auf Tesseract: {e}")
-        from app.core.config import settings
-        return _ocr_pdf(file_path, settings.documents.ocr_language)
+        # Navigate parent references to collect heading context
+        current = item
+        for _ in range(10):  # max depth guard
+            parent = getattr(current, "parent", None)
+            if parent is None:
+                break
+            parent_label = getattr(parent, "label", None) or ""
+            if "heading" in str(parent_label).lower():
+                parent_text = getattr(parent, "text", "") or ""
+                if parent_text.strip():
+                    headings.insert(0, parent_text.strip())
+            current = parent
+    except Exception:
+        pass
+    return headings
 
 
-def _parse_docx(file_path: str) -> ParsedDocument:
-    """Parst ein Word-Dokument."""
-    from docx import Document as DocxDocument
-
-    doc = DocxDocument(file_path)
-    sections = []
-    current_section = None
-    current_text = []
-
-    for para in doc.paragraphs:
-        if para.style.name.startswith("Heading"):
-            if current_text:
-                sections.append(ParsedSection(
-                    header=current_section, content="\n".join(current_text),
-                ))
-            current_section = para.text
-            current_text = []
-        else:
-            if para.text.strip():
-                current_text.append(para.text)
-
-    if current_text:
-        sections.append(ParsedSection(header=current_section, content="\n".join(current_text)))
-
-    full_text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
-    return ParsedDocument(text=full_text, sections=sections)
+def _get_docling_page_count(doc) -> int | None:
+    """Get page count from DoclingDocument provenance."""
+    try:
+        max_page = 0
+        for item, _level in doc.iterate_items():
+            prov = getattr(item, "prov", None)
+            if prov:
+                for p in prov:
+                    page_no = getattr(p, "page_no", 0) or 0
+                    if page_no > max_page:
+                        max_page = page_no
+        return max_page if max_page > 0 else None
+    except Exception:
+        return None
 
 
-def _parse_xlsx(file_path: str) -> ParsedDocument:
-    """Parst eine Excel-Datei."""
-    from openpyxl import load_workbook
+# =============================================================================
+# Legacy pipeline (backup)
+# =============================================================================
 
-    wb = load_workbook(file_path, data_only=True)
-    sections = []
-    full_text = []
-
-    for sheet_name in wb.sheetnames:
-        sheet = wb[sheet_name]
-        rows = []
-        for row in sheet.iter_rows(values_only=True):
-            row_text = " | ".join(str(cell) for cell in row if cell is not None)
-            if row_text.strip():
-                rows.append(row_text)
-
-        if rows:
-            section_text = "\n".join(rows)
-            sections.append(ParsedSection(header=f"Blatt: {sheet_name}", content=section_text))
-            full_text.append(f"[{sheet_name}]\n{section_text}")
-
-    return ParsedDocument(text="\n\n".join(full_text), sections=sections)
-
-
-def _parse_pptx(file_path: str) -> ParsedDocument:
-    """Parst eine PowerPoint-Datei."""
-    from pptx import Presentation
-
-    prs = Presentation(file_path)
-    sections = []
-    full_text = []
-
-    for i, slide in enumerate(prs.slides):
-        texts = []
-        for shape in slide.shapes:
-            if shape.has_text_frame:
-                texts.append(shape.text_frame.text)
-
-        if texts:
-            slide_text = "\n".join(texts)
-            sections.append(ParsedSection(header=f"Folie {i + 1}", content=slide_text, page_number=i + 1))
-            full_text.append(slide_text)
-
-    return ParsedDocument(text="\n\n".join(full_text), sections=sections, page_count=len(prs.slides))
-
-
-def _parse_text(file_path: str) -> ParsedDocument:
-    """Parst eine Textdatei."""
-    with open(file_path, encoding="utf-8", errors="replace") as f:
-        text = f.read()
-    return ParsedDocument(text=text, sections=[ParsedSection(header=None, content=text)])
-
-
-def _parse_csv(file_path: str) -> ParsedDocument:
-    """Parst eine CSV-Datei."""
-    import csv
-    rows = []
-    with open(file_path, encoding="utf-8", errors="replace") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            rows.append(" | ".join(row))
-
-    text = "\n".join(rows)
-    return ParsedDocument(text=text, sections=[ParsedSection(header=None, content=text)])
-
-
-def _parse_html(file_path: str) -> ParsedDocument:
-    """Parst eine HTML/XML-Datei."""
-    from bs4 import BeautifulSoup
-
-    with open(file_path, encoding="utf-8", errors="replace") as f:
-        soup = BeautifulSoup(f.read(), "html.parser")
-
-    text = soup.get_text(separator="\n", strip=True)
-    return ParsedDocument(text=text, sections=[ParsedSection(header=None, content=text)])
+def _parse_with_legacy(file_path: str, file_type: str) -> ParsedDocument:
+    """Parse using legacy parsers (pre-docling)."""
+    from app.utils.file_parsers_legacy import parse_document as legacy_parse
+    return legacy_parse(file_path, file_type)
