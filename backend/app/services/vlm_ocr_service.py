@@ -107,6 +107,7 @@ class VlmOcrService:
             ],
             "max_tokens": self.config.max_tokens,
             "temperature": 0.1,
+            "enable_thinking": False,
         }
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(
