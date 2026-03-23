@@ -29,25 +29,8 @@ class VlmOcrService:
         self.base_url = self.config.base_url
 
     def _build_system_prompt(self) -> str:
-        """Baut den System-Prompt, mit oder ohne Layout-as-thought."""
-        base = self.config.system_prompt
-        if self.config.layout_as_thought:
-            return (
-                "IMPORTANT: Before extracting text, you MUST first perform "
-                "Layout-as-thought analysis.\n"
-                "Step 1 — LAYOUT ANALYSIS (internal, do not output):\n"
-                "  • Identify the page structure: number of columns, header/footer "
-                "regions, sidebars, margin notes.\n"
-                "  • Detect tables (rows × columns), bulleted/numbered lists, "
-                "captions, and figure references.\n"
-                "  • Determine the logical reading order across all regions.\n"
-                "Step 2 — TEXT EXTRACTION (output this):\n"
-                "  • Using the layout analysis, extract all text in logical "
-                "reading order.\n"
-                "  • Preserve paragraph separation and structural hierarchy.\n\n"
-                + base
-            )
-        return base
+        """Returns the system prompt for OCR."""
+        return self.config.system_prompt
 
     @staticmethod
     def _image_to_data_uri(image_bytes: bytes, mime_type: str = "image/png") -> str:
@@ -107,7 +90,7 @@ class VlmOcrService:
             ],
             "max_tokens": self.config.max_tokens,
             "temperature": 0.1,
-            "enable_thinking": False,
+            "enable_thinking": self.config.layout_as_thought,
         }
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(
@@ -126,10 +109,10 @@ class VlmOcrService:
         message = data["choices"][0]["message"]
         text = message.get("content") or ""
 
-        # With peg-native chat format, the model may put layout analysis
-        # into reasoning_content (thinking tokens) and leave content empty
-        # if it hits max_tokens before reaching the extraction phase.
-        # Fall back to reasoning_content so we still capture the OCR text.
+        # When layout_as_thought is on, the model thinks about page layout
+        # in reasoning_content and outputs extracted text in content.
+        # If content is empty (e.g. max_tokens exhausted during thinking),
+        # fall back to reasoning_content which may still contain useful text.
         if not text.strip():
             text = message.get("reasoning_content") or ""
 
