@@ -42,7 +42,7 @@ class DatabaseConfig(BaseModel):
 
 
 class VectorConfig(BaseModel):
-    dimensions: int = 1024
+    dimensions: int = 4096
     index_type: str = "ivfflat"
     distance_metric: str = "cosine"
     ivfflat_lists: int = 100
@@ -70,8 +70,8 @@ class ThinkingSamplingConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    base_url: str = "http://llama-cpp:8080"
-    model: str = "Qwen3.5-35B-A3B-UD-IQ3_S.gguf"
+    base_url: str = "http://vllm-llm:8080"
+    model: str = "Qwen/Qwen3.5-35B-A3B"
     max_tokens: int = 65536
     context_window: int = 65536
     timeout: int = 120
@@ -83,19 +83,19 @@ class LLMConfig(BaseModel):
 
 
 class EmbeddingConfig(BaseModel):
-    base_url: str = "http://llama-cpp-embed:8081"
-    model: str = "pplx-embed-context-v1-0.6b-q8_0.gguf"
+    base_url: str = "http://vllm-embed:8081"
+    model: str = "pplx-ai/pplx-embed-context-4b"
     batch_size: int = 32
     max_retries: int = 3
-    timeout: int = 120  # Higher timeout — embedding runs on CPU
+    timeout: int = 60
 
 
 class VlmOcrConfig(BaseModel):
     enabled: bool = True
-    base_url: str = "http://llama-cpp-vlm:8082"
-    model: str = "Qianfan-OCR-Q8_0.gguf"
-    timeout: int = 600  # Read timeout in seconds — VLM generates ~13 tok/s on CPU
-    max_tokens: int = 16384  # Must be large enough for thinking + OCR output
+    base_url: str = "http://vllm-ocr:8082"
+    model: str = "stepfun-ai/Qianfan-OCR"
+    timeout: int = 120  # GPU inference is much faster than CPU
+    max_tokens: int = 16384
     max_image_size_px: int = 2048
     dpi: int = 300
     layout_as_thought: bool = True
@@ -108,6 +108,21 @@ class VlmOcrConfig(BaseModel):
         "For tables, render them in markdown table format.\n"
         "Output ONLY the extracted document text — no commentary."
     )
+
+
+class DoclingConfig(BaseModel):
+    enabled: bool = True  # Use docling pipeline (false = legacy parsers)
+    # Pipeline options
+    do_ocr: bool = True
+    do_table_structure: bool = True
+    table_mode: str = "fast"  # "fast" or "accurate"
+    # Chunking
+    use_docling_chunker: bool = True  # Use HybridChunker (false = legacy chunking)
+    max_tokens: int = 512  # Token limit per chunk for HybridChunker
+    merge_peers: bool = True  # Merge undersized adjacent chunks with same headings
+    tokenizer: str = ""  # HuggingFace tokenizer name (empty = use embedding model name)
+    # GPU acceleration
+    accelerator_device: str = "auto"  # "auto", "cuda", "mps", "cpu"
 
 
 class ChunkingConfig(BaseModel):
@@ -173,6 +188,7 @@ class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     vlm_ocr: VlmOcrConfig = VlmOcrConfig()
+    docling: DoclingConfig = DoclingConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
     documents: DocumentsConfig = DocumentsConfig()

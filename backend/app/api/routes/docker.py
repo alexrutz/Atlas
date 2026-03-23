@@ -18,9 +18,9 @@ router = APIRouter()
 # Container names defined in docker-compose.yml
 COMPOSE_CONTAINER_NAMES = {
     "atlas-postgres",
-    "atlas-llama-cpp",
-    "atlas-llama-cpp-embed",
-    "atlas-llama-cpp-vlm",
+    "atlas-vllm-llm",
+    "atlas-vllm-embed",
+    "atlas-vllm-ocr",
     "atlas-backend",
     "atlas-llm-diagnostic",
     "atlas-frontend",

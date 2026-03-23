@@ -1,13 +1,14 @@
 # =============================================================================
 # Atlas RAG System - Docker Compose
 # =============================================================================
-# Startet alle benötigten Services für das Atlas RAG System
-# Verwendung: docker compose up -d
+# Starts all required services for the Atlas RAG system.
+# All inference services run on vLLM with GPU acceleration.
+# Usage: docker compose up -d
 # =============================================================================
 
 services:
   # ---------------------------------------------------------------------------
-  # PostgreSQL mit pgvector Extension
+  # PostgreSQL with pgvector extension
   # ---------------------------------------------------------------------------
   postgres:
     image: pgvector/pgvector:pg16
@@ -16,7 +17,7 @@ services:
     environment:
       POSTGRES_DB: atlas
       POSTGRES_USER: atlas_user
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD muss gesetzt sein}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
     ports:
       - "5432:5432"
     volumes:
@@ -31,25 +32,30 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # llama.cpp - LLM Server (OpenAI-kompatible API)
-  # Configure via .env: LLM_MODEL, LLM_CTX_SIZE, LLM_PREDICT
+  # vLLM - LLM Server (OpenAI-compatible API, GPU)
+  # Model: Qwen3.5-35B-A3B (MoE, ~3.5B active parameters)
+  # Configure via .env: LLM_MODEL, LLM_MAX_MODEL_LEN, LLM_GPU_UTIL
   # ---------------------------------------------------------------------------
-  llama-cpp:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
-    container_name: atlas-llama-cpp
+  vllm-llm:
+    image: vllm/vllm-openai:latest
+    container_name: atlas-vllm-llm
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      - ../models:/models:ro
+      - ../models:/models
+    environment:
+      - HF_HOME=/models/huggingface
+      - VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
     command: >
-      --host 0.0.0.0
+      --model ${LLM_MODEL:-Qwen/Qwen3.5-35B-A3B}
       --port 8080
-      --model /models/${LLM_MODEL}
-      --ctx-size ${LLM_CTX_SIZE:-65536}
-      --n-predict ${LLM_PREDICT:-65536}
-      --n-gpu-layers 99
-      --jinja
+      --max-model-len ${LLM_MAX_MODEL_LEN:-65536}
+      --gpu-memory-utilization ${LLM_GPU_UTIL:-0.55}
+      --enable-reasoning
+      --reasoning-parser deepseek_r1
+      --trust-remote-code
+      --dtype auto
     deploy:
       resources:
         reservations:
@@ -61,70 +67,85 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 10
+      start_period: 120s
     networks:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # llama.cpp - Embedding Server (text → vectors, CPU-only)
-  # Runs on CPU to keep all VRAM available for the LLM.
-  # Configure via .env: EMBED_MODEL, EMBED_CTX_SIZE
+  # vLLM - Embedding Server (GPU-accelerated)
+  # Model: pplx-embed-context-4b (4B parameters)
+  # Configure via .env: EMBED_MODEL, EMBED_GPU_UTIL
   # ---------------------------------------------------------------------------
-  llama-cpp-embed:
-    image: ghcr.io/ggml-org/llama.cpp:server
-    container_name: atlas-llama-cpp-embed
+  vllm-embed:
+    image: vllm/vllm-openai:latest
+    container_name: atlas-vllm-embed
     restart: unless-stopped
     ports:
       - "8081:8081"
     volumes:
-      - ../models:/models:ro
+      - ../models:/models
+    environment:
+      - HF_HOME=/models/huggingface
     command: >
-      --host 0.0.0.0
+      --model ${EMBED_MODEL:-pplx-ai/pplx-embed-context-4b}
       --port 8081
-      --model /models/${EMBED_MODEL}
-      --ctx-size ${EMBED_CTX_SIZE:-32768}
-      --batch-size ${EMBED_CTX_SIZE:-32768}
-      --ubatch-size ${EMBED_CTX_SIZE:-32768}
-      --n-gpu-layers 0
-      --embedding
+      --task embed
+      --gpu-memory-utilization ${EMBED_GPU_UTIL:-0.20}
+      --max-model-len ${EMBED_MAX_MODEL_LEN:-32768}
+      --trust-remote-code
+      --dtype auto
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 10
+      start_period: 120s
     networks:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # llama.cpp - VLM OCR Server (images → structured text, CPU-only)
-  # Runs on CPU to keep all VRAM available for the LLM.
-  # Ingestion is a background task so slower inference is acceptable.
-  # Configure via .env: VLM_MODEL, VLM_CTX_SIZE, VLM_EXTRA_ARGS
-  # Available VLM models (GGUF files must be in ../models):
-  #   Qianfan-OCR-Q8_0.gguf      (4B, Layout-as-thought, + mmproj-Qianfan-OCR-Q8_0.gguf)
-  #   GLM-OCR-Q8_0.gguf          (0.9B, + mmproj-GLM-OCR-Q8_0.gguf)
-  #   PaddleOCR-VL-1.5-Q8_0.gguf (0.5B, + PaddleOCR-VL-1.5-mmproj.gguf)
+  # vLLM - VLM OCR Server (GPU-accelerated)
+  # Model: Qianfan-OCR (Vision-Language Model for layout-aware OCR)
+  # Configure via .env: VLM_MODEL, VLM_GPU_UTIL
   # ---------------------------------------------------------------------------
-  llama-cpp-vlm:
-    image: ghcr.io/ggml-org/llama.cpp:server
-    container_name: atlas-llama-cpp-vlm
+  vllm-ocr:
+    image: vllm/vllm-openai:latest
+    container_name: atlas-vllm-ocr
     restart: unless-stopped
     ports:
       - "8082:8082"
     volumes:
-      - ../models:/models:ro
+      - ../models:/models
+    environment:
+      - HF_HOME=/models/huggingface
     command: >
-      --host 0.0.0.0
+      --model ${VLM_MODEL:-stepfun-ai/Qianfan-OCR}
       --port 8082
-      --model /models/${VLM_MODEL}
-      --ctx-size ${VLM_CTX_SIZE:-32768}
-      --n-gpu-layers 0
-      ${VLM_EXTRA_ARGS}
+      --gpu-memory-utilization ${VLM_GPU_UTIL:-0.20}
+      --max-model-len ${VLM_MAX_MODEL_LEN:-32768}
+      --trust-remote-code
+      --dtype auto
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 10
+      start_period: 120s
     networks:
       - atlas-network
 
@@ -139,7 +160,7 @@ services:
     restart: unless-stopped
     environment:
       DB_PASSWORD: ${DB_PASSWORD}
-      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY muss gesetzt sein}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY must be set}
       ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-admin}
     ports:
       - "8000:8000"
@@ -151,11 +172,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      llama-cpp:
+      vllm-llm:
         condition: service_healthy
-      llama-cpp-embed:
+      vllm-embed:
         condition: service_healthy
-      llama-cpp-vlm:
+      vllm-ocr:
         condition: service_healthy
     networks:
       - atlas-network

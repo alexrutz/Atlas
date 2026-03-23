@@ -1,9 +1,15 @@
 """
-Retrieval Service - Semantische Vektorsuche mit Cross-Encoder Reranking.
+Retrieval Service - Semantic vector search with cross-encoder reranking.
 
-Sucht nur in Collections, auf die der Benutzer Zugriff hat.
-Verwendet pgvector für semantische Ähnlichkeitssuche und FlashRank
-als Cross-Encoder für Reranking.
+Searches only in collections the user has access to.
+Uses pgvector for semantic similarity search and FlashRank
+as cross-encoder for reranking.
+
+Database layout:
+  - rag.chunks       — chunk text & metadata
+  - rag.chunk_embeddings — embedding vectors (separate table)
+  - content.documents    — document metadata
+  - content.collections  — collection metadata
 """
 
 import logging
@@ -72,7 +78,7 @@ def _keyword_score(query_tokens: list[str], chunk_tokens: list[str]) -> float:
 
 @dataclass
 class RetrievalResult:
-    """Ein einzelnes Suchergebnis."""
+    """A single search result."""
     chunk_id: int
     document_id: int
     document_name: str
@@ -84,7 +90,7 @@ class RetrievalResult:
 
 
 class RetrievalService:
-    """Semantische Vektorsuche über Chunks mit Berechtigungsprüfung."""
+    """Semantic vector search over chunks with permission checks."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -98,44 +104,43 @@ class RetrievalService:
         top_k: int | None = None,
     ) -> list[RetrievalResult]:
         """
-        Führt eine semantische Vektorsuche durch.
+        Perform a semantic vector search.
 
         Args:
-            query: Die Suchanfrage
-            collection_ids: IDs der zu durchsuchenden Collections (bereits berechtigungsgeprüft)
-            top_k: Anzahl der Ergebnisse (Standard aus Konfiguration)
+            query: The search query
+            collection_ids: IDs of collections to search (already permission-checked)
+            top_k: Number of results (default from config)
 
         Returns:
-            Liste von RetrievalResult, sortiert nach Relevanz
+            List of RetrievalResult, sorted by relevance
         """
         top_k = top_k or self.config.top_k
 
         if not collection_ids:
             return []
 
-        # Query-Embedding berechnen
         logger.info(f"Retrieval: query='{query[:100]}', collections={collection_ids}, top_k={top_k}")
         query_embedding = await self.embedding.embed_query(query)
-        logger.debug(f"Embedding berechnet: {len(query_embedding)} Dimensionen")
+        logger.debug(f"Embedding computed: {len(query_embedding)} dimensions")
 
         results = await self._vector_search(query_embedding, collection_ids, top_k)
 
-        # Optionaler Post-Query-Schwellenwert-Filter
+        # Post-query threshold filter
         threshold = self.config.similarity_threshold
         if threshold > 0 and results:
             before = len(results)
             results = [r for r in results if r.similarity_score >= threshold]
             if len(results) < before:
-                logger.info(f"Schwellenwert-Filter ({threshold}): {before} → {len(results)} Ergebnisse")
+                logger.info(f"Threshold filter ({threshold}): {before} → {len(results)} results")
 
         if results:
             scores = [r.similarity_score for r in results]
-            logger.info(f"Retrieval: {len(results)} Ergebnisse, Scores: "
+            logger.info(f"Retrieval: {len(results)} results, scores: "
                         f"max={max(scores):.3f}, min={min(scores):.3f}, avg={sum(scores)/len(scores):.3f}")
         else:
-            logger.warning(f"Retrieval: 0 Ergebnisse für query='{query[:100]}'")
+            logger.warning(f"Retrieval: 0 results for query='{query[:100]}'")
 
-        # Optionales Reranking
+        # Optional reranking
         if self.config.rerank and len(results) > self.config.rerank_top_k:
             results = await self._rerank(query, results)
             results = results[:self.config.rerank_top_k]
@@ -148,24 +153,27 @@ class RetrievalService:
         collection_ids: list[int],
         top_k: int,
     ) -> list[RetrievalResult]:
-        """Semantische Vektorsuche mit pgvector."""
+        """Semantic vector search with pgvector across rag.chunks + rag.chunk_embeddings."""
         embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
 
         query = text(f"""
             SELECT c.id, c.document_id, c.content, c.section_header, c.page_number,
                    d.original_name as document_name, col.name as collection_name,
-                   1 - (c.embedding <=> '{embedding_str}'::vector) as similarity
-            FROM chunks c
-            JOIN documents d ON c.document_id = d.id
-            JOIN collections col ON d.collection_id = col.id
+                   1 - (ce.embedding <=> '{embedding_str}'::vector) as similarity
+            FROM rag.chunk_embeddings ce
+            JOIN rag.chunks c ON ce.chunk_id = c.id
+            JOIN content.documents d ON c.document_id = d.id
+            JOIN content.collections col ON d.collection_id = col.id
             WHERE d.collection_id = ANY(:collection_ids)
               AND d.processing_status = 'completed'
-            ORDER BY c.embedding <=> '{embedding_str}'::vector
+              AND ce.model_name = :model_name
+            ORDER BY ce.embedding <=> '{embedding_str}'::vector
             LIMIT :top_k
         """)
 
         result = await self.db.execute(query, {
             "collection_ids": collection_ids,
+            "model_name": settings.embedding.model,
             "top_k": top_k,
         })
 
@@ -182,10 +190,6 @@ class RetrievalService:
     async def _rerank(self, query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:
         """
         Rerank with FlashRank cross-encoder, falling back to keyword scoring.
-
-        FlashRank uses an ONNX cross-encoder (ms-marco-MiniLM-L-12-v2 by default)
-        that scores each (query, passage) pair with full token-level attention —
-        much more accurate than cosine similarity alone.
         """
         if not results:
             return results
@@ -209,7 +213,6 @@ class RetrievalService:
         rerank_request = RerankRequest(query=query, passages=passages)
         ranked = ranker.rerank(rerank_request)
 
-        # Map back to RetrievalResult objects, update similarity_score
         idx_to_result = {idx: r for idx, r in enumerate(results)}
         reranked: list[RetrievalResult] = []
         for item in ranked:

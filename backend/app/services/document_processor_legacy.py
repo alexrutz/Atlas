@@ -1,12 +1,9 @@
 """
 Document Processor - Parsing and chunking of documents.
 
-Supports two pipelines:
-1. Docling (default): ML-powered parsing with layout analysis, table structure
-   recognition, and token-aware chunking via HybridChunker.
-2. Legacy: pypdf + custom chunking strategies (fallback / configurable).
-
+Supports various file formats and chunking strategies.
 Chunks are stored in rag.chunks, embeddings in rag.chunk_embeddings.
+Scanned-PDF OCR uses Qianfan-OCR VLM with Layout-as-thought (configurable).
 """
 
 import asyncio
@@ -21,7 +18,7 @@ from app.models.document import Document
 from app.models.chunk import Chunk, ChunkEmbedding
 from app.services.embedding_service import EmbeddingService
 from app.utils.file_parsers import parse_document, ParsedDocument
-from app.utils.text_processing import chunk_document, ChunkData
+from app.utils.text_processing import chunk_text
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +40,8 @@ class DocumentProcessor:
 
         Flow:
         1. Load document from DB
-        2. Parse file (Docling ML pipeline or legacy parsers)
-        3. Chunk (Docling HybridChunker or legacy strategies)
+        2. Parse file (extract text, optionally VLM-OCR)
+        3. Split text into chunks
         4. Compute embedding for each chunk
         5. Store chunks in rag.chunks, embeddings in rag.chunk_embeddings
         6. Update document status
@@ -58,23 +55,17 @@ class DocumentProcessor:
 
         try:
             # 2. Parse file (non-blocking: offloaded to thread pool)
-            pipeline = "docling" if settings.docling.enabled else "legacy"
-            logger.info(f"Parsing document: {document.original_name} (pipeline={pipeline})")
+            logger.info(f"Parsing document: {document.original_name}")
             parsed = await self._parse(document.file_path, document.file_type)
 
-            # 3. Chunk document (docling-aware: uses DoclingDocument if available)
-            chunker_type = "docling" if (
-                settings.docling.enabled
-                and settings.docling.use_docling_chunker
-                and parsed.docling_document is not None
-            ) else "legacy"
-            logger.info(f"Chunking with: {chunker_type}")
-
-            chunks = await asyncio.to_thread(
-                chunk_document,
+            # 3. Split text into chunks
+            logger.info(f"Chunking with strategy: {settings.chunking.strategy}")
+            chunks = chunk_text(
                 text=parsed.text,
+                strategy=settings.chunking.strategy,
+                chunk_size=settings.chunking.chunk_size,
+                overlap=settings.chunking.chunk_overlap,
                 sections=parsed.sections,
-                docling_document=parsed.docling_document,
             )
 
             # 4. Prepare chunks and texts for embedding
@@ -83,22 +74,13 @@ class DocumentProcessor:
             chunk_objects = []
 
             for i, chunk_data in enumerate(chunks):
-                # Use contextualized text for embedding if available
-                # (includes heading/caption context from docling)
-                embed_text = chunk_data.contextualized_text or chunk_data.text
-                chunk_texts.append(embed_text)
-
+                chunk_texts.append(chunk_data.text)
                 chunk_obj = Chunk(
                     document_id=document.id,
                     chunk_index=i,
                     content=chunk_data.text,
                     section_header=chunk_data.section_header,
                     page_number=chunk_data.page_number,
-                    metadata_={
-                        "parser": parsed.metadata.get("parser", "legacy"),
-                        "chunker": chunker_type,
-                        **({"has_context": True} if chunk_data.contextualized_text else {}),
-                    },
                 )
                 chunk_objects.append(chunk_obj)
                 self.db.add(chunk_obj)

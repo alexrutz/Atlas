@@ -20,7 +20,11 @@ bcrypt==4.2.1
 pyyaml==6.0.2
 pydantic==2.10.4
 
-# Document processing
+# Document processing - Docling (primary pipeline)
+docling>=2.31.0
+docling-core[chunking]>=2.31.0
+
+# Document processing - Legacy (fallback)
 pypdf==5.1.0
 python-docx==1.1.2
 openpyxl==3.1.5

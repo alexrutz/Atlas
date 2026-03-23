@@ -1,7 +1,7 @@
 """
-Atlas RAG System - FastAPI Einstiegspunkt
+Atlas RAG System - FastAPI Entry Point
 
-Lädt die zentrale Konfiguration und startet alle API-Routen.
+Loads the central configuration and starts all API routes.
 """
 
 import logging
@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 # Initialize diagnostic logging for LLM calls
 setup_diagnostic_logging()
 
+# PostgreSQL schemas used by the application
+DB_SCHEMAS = ["iam", "content", "rag", "chat", "config"]
+
 
 async def load_prompt_overrides():
     """Load prompt overrides from the database into the in-memory config."""
@@ -42,7 +45,7 @@ async def load_prompt_overrides():
 
 
 async def seed_admin_user():
-    """Erstellt den Standard-Admin-Benutzer, falls keiner existiert."""
+    """Create the default admin user if none exists."""
     from app.models.user import User
 
     async with async_session() as session:
@@ -62,49 +65,53 @@ async def seed_admin_user():
         result = await session.execute(stmt)
         await session.commit()
         if result.fetchone():
-            logger.info(f"Admin-Benutzer '{settings.auth.default_admin_username}' wurde erstellt.")
+            logger.info(f"Admin user '{settings.auth.default_admin_username}' created.")
         else:
-            logger.info("Admin-Benutzer existiert bereits.")
+            logger.info("Admin user already exists.")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup- und Shutdown-Logik."""
+    """Startup and shutdown logic."""
     # --- Startup ---
-    logger.info("Atlas RAG System startet...")
+    logger.info("Atlas RAG System starting...")
     logger.info(f"LLM: {settings.llm.model} @ {settings.llm.base_url}")
     logger.info(f"Embedding: {settings.embedding.model} @ {settings.embedding.base_url}")
-    # Datenbank-Tabellen erstellen (nur bei Erststart, danach Alembic nutzen)
-    # Advisory lock serialisiert parallele Worker, sodass nur einer die Tabellen anlegt.
+    logger.info(f"VLM-OCR: {settings.vlm_ocr.model} @ {settings.vlm_ocr.base_url}")
+
+    # Create schemas and tables
+    # Advisory lock serialises parallel workers so only one creates the tables.
     async with engine.begin() as conn:
         await conn.execute(text("SELECT pg_advisory_xact_lock(20250320)"))
-        await conn.run_sync(Base.metadata.create_all)
-        # Fehlende Spalten hinzufügen (für bestehende Datenbanken ohne Alembic)
-        await conn.execute(text(
-            "ALTER TABLE collections ADD COLUMN IF NOT EXISTS context_text TEXT"
-        ))
 
-    # Admin-Benutzer anlegen, falls keiner existiert
+        # Ensure all schemas exist
+        for schema in DB_SCHEMAS:
+            await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+
+        # Create all tables within their respective schemas
+        await conn.run_sync(Base.metadata.create_all)
+
+    # Seed admin user
     await seed_admin_user()
 
     # Load prompt overrides from DB
     await load_prompt_overrides()
 
-    logger.info("Atlas RAG System bereit.")
+    logger.info("Atlas RAG System ready.")
     yield
     # --- Shutdown ---
-    logger.info("Atlas RAG System wird heruntergefahren...")
+    logger.info("Atlas RAG System shutting down...")
     await engine.dispose()
 
 
 app = FastAPI(
     title="Atlas RAG System",
-    description="Lokales Retrieval-Augmented Generation System für Firmendokumente",
-    version="0.1.0",
+    description="On-premises Retrieval-Augmented Generation system for enterprise documents",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
-# CORS konfigurieren
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.server.cors_origins,
@@ -113,18 +120,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API-Routen registrieren
-app.include_router(auth.router, prefix="/api/auth", tags=["Authentifizierung"])
-app.include_router(users.router, prefix="/api/users", tags=["Benutzer"])
-app.include_router(groups.router, prefix="/api/groups", tags=["Gruppen"])
+# API routes
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(users.router, prefix="/api/users", tags=["Users"])
+app.include_router(groups.router, prefix="/api/groups", tags=["Groups"])
 app.include_router(collections.router, prefix="/api/collections", tags=["Collections"])
-app.include_router(documents.router, prefix="/api", tags=["Dokumente"])
+app.include_router(documents.router, prefix="/api", tags=["Documents"])
 app.include_router(chat.router, prefix="/api", tags=["Chat"])
-app.include_router(settings_router.router, prefix="/api/settings", tags=["Einstellungen"])
+app.include_router(settings_router.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(docker.router, prefix="/api/docker", tags=["Docker"])
 
 
 @app.get("/api/health")
 async def health_check():
-    """Gesundheitsprüfung für Monitoring."""
-    return {"status": "healthy", "version": "0.1.0"}
+    """Health check for monitoring."""
+    return {"status": "healthy", "version": "0.2.0"}
