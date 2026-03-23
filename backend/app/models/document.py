@@ -1,4 +1,4 @@
-"""ORM-Modell: Dokumente."""
+"""ORM model: Documents (content schema)."""
 
 from datetime import datetime, timezone
 
@@ -11,9 +11,10 @@ from app.core.database import Base
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = {"schema": "content"}
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    collection_id: Mapped[int] = mapped_column(Integer, ForeignKey("collections.id", ondelete="CASCADE"), nullable=False)
+    collection_id: Mapped[int] = mapped_column(Integer, ForeignKey("content.collections.id", ondelete="CASCADE"), nullable=False)
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     original_name: Mapped[str] = mapped_column(String(500), nullable=False)
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
@@ -28,7 +29,7 @@ class Document(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
 
     # Tracking
-    uploaded_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    uploaded_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("iam.users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

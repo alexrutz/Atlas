@@ -1,4 +1,4 @@
-"""ORM-Modell: Chat-Konversationen und Nachrichten."""
+"""ORM models: Conversations and messages (chat schema)."""
 
 from datetime import datetime, timezone
 
@@ -11,9 +11,10 @@ from app.core.database import Base
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    __table_args__ = {"schema": "chat"}
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("iam.users.id", ondelete="CASCADE"), nullable=False)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -25,9 +26,10 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = {"schema": "chat"}
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    conversation_id: Mapped[int] = mapped_column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
+    conversation_id: Mapped[int] = mapped_column(Integer, ForeignKey("chat.conversations.id", ondelete="CASCADE"), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     used_collections = mapped_column(ARRAY(Integer), default=list)
@@ -41,6 +43,7 @@ class Message(Base):
 
 class UserSelectedCollection(Base):
     __tablename__ = "user_selected_collections"
+    __table_args__ = {"schema": "chat"}
 
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    collection_id: Mapped[int] = mapped_column(Integer, ForeignKey("collections.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("iam.users.id", ondelete="CASCADE"), primary_key=True)
+    collection_id: Mapped[int] = mapped_column(Integer, ForeignKey("content.collections.id", ondelete="CASCADE"), primary_key=True)

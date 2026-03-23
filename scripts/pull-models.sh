@@ -1,29 +1,32 @@
 #!/bin/bash
 # =============================================================================
-# Modelle herunterladen für llama.cpp
+# Model setup for Atlas RAG System (vLLM)
 # =============================================================================
-# Die GGUF-Modelle müssen manuell in den ../models Ordner gelegt werden.
+# vLLM downloads models from HuggingFace automatically on first start.
+# Alternatively, place models in the ../models directory.
 # =============================================================================
 
 set -e
 
 MODELS_DIR="../models"
 
-echo "=== Atlas Modell-Setup ==="
+echo "=== Atlas Model Setup ==="
 echo ""
-echo "Stelle sicher, dass folgende Modelle im Ordner '$MODELS_DIR' vorhanden sind:"
+echo "vLLM downloads models from HuggingFace automatically on first start."
+echo "Default models:"
 echo ""
-echo "  LLM:       Qwen3.5-35B-A3B-UD-IQ3_S.gguf"
-echo "  Embedding:  pplx-embed-context-v1-0.6b-q8_0.gguf"
+echo "  LLM:       Qwen/Qwen3.5-35B-A3B"
+echo "  Embedding: pplx-ai/pplx-embed-context-4b"
+echo "  OCR:       stepfun-ai/Qianfan-OCR"
+echo ""
+echo "Models will be cached in '$MODELS_DIR/huggingface'."
 echo ""
 
-if [ -d "$MODELS_DIR" ]; then
-    echo "Vorhandene Modelle:"
-    ls -lh "$MODELS_DIR"/*.gguf 2>/dev/null || echo "  Keine .gguf Dateien gefunden"
-else
-    echo "Erstelle Modell-Verzeichnis: $MODELS_DIR"
-    mkdir -p "$MODELS_DIR"
-fi
+mkdir -p "$MODELS_DIR/huggingface"
 
+echo "Model cache directory ready: $MODELS_DIR/huggingface"
 echo ""
-echo "Modelle können z.B. von Hugging Face heruntergeladen werden."
+echo "To pre-download models, you can run:"
+echo "  huggingface-cli download Qwen/Qwen3.5-35B-A3B --cache-dir $MODELS_DIR/huggingface"
+echo "  huggingface-cli download pplx-ai/pplx-embed-context-4b --cache-dir $MODELS_DIR/huggingface"
+echo "  huggingface-cli download stepfun-ai/Qianfan-OCR --cache-dir $MODELS_DIR/huggingface"

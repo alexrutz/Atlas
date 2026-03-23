@@ -1,7 +1,7 @@
 """
-LLM Service - Communication with llama.cpp via the OpenAI-compatible API.
+LLM Service - Communication with vLLM via the OpenAI-compatible API.
 
-Supports streaming, thinking mode, and different system prompts.
+Supports streaming, thinking mode (reasoning), and different system prompts.
 """
 
 import json
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    """Communication with llama.cpp via the OpenAI-compatible API."""
+    """Communication with vLLM via the OpenAI-compatible API."""
 
     def __init__(self):
         self.config = settings.llm
@@ -30,12 +30,20 @@ class LLMService:
     def _sampling_params(self, enable_thinking: bool) -> dict:
         """Return sampling parameters based on thinking mode."""
         s = self.config.thinking_sampling if enable_thinking else self.config.sampling
-        return {
+        params = {
             "temperature": s.temperature,
             "top_p": s.top_p,
+            "presence_penalty": s.presence_penalty,
+        }
+        # vLLM supports extra params via extra_body
+        return params
+
+    def _extra_body(self, enable_thinking: bool) -> dict:
+        """Return vLLM-specific extra parameters."""
+        s = self.config.thinking_sampling if enable_thinking else self.config.sampling
+        return {
             "top_k": s.top_k,
             "min_p": s.min_p,
-            "presence_penalty": s.presence_penalty,
             "repetition_penalty": s.repetition_penalty,
         }
 
@@ -58,11 +66,12 @@ class LLMService:
         ]
 
         body: dict = {
+            "model": self.config.model,
             "messages": messages,
             **self._sampling_params(enable_thinking),
             "max_tokens": self.config.max_tokens,
             "stream": False,
-            "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
+            "extra_body": self._extra_body(enable_thinking),
         }
         logger.info(f"generate: enable_thinking={enable_thinking}")
 
@@ -80,7 +89,6 @@ class LLMService:
                     "thinking": choice.get("reasoning_content", ""),
                 }
 
-                # Diagnostic: single log entry with both input and output
                 log_rag_call(
                     system_prompt=system,
                     user_prompt=prompt,
@@ -118,15 +126,15 @@ class LLMService:
         ]
 
         body: dict = {
+            "model": self.config.model,
             "messages": messages,
             **self._sampling_params(enable_thinking),
             "max_tokens": self.config.max_tokens,
             "stream": True,
-            "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
+            "extra_body": self._extra_body(enable_thinking),
         }
         logger.info(f"generate_stream: enable_thinking={enable_thinking}")
 
-        # Diagnostic: log stream start
         log_rag_call(
             system_prompt=system,
             user_prompt=prompt,
@@ -151,7 +159,7 @@ class LLMService:
                     try:
                         chunk = json.loads(payload)
                         delta = chunk["choices"][0].get("delta", {})
-                        # Thinking content
+                        # Thinking content (reasoning)
                         if delta.get("reasoning_content"):
                             yield {"type": "thinking", "text": delta["reasoning_content"]}
                         # Regular content
@@ -169,15 +177,15 @@ class LLMService:
         ]
 
         sampling = self._sampling_params(enable_thinking)
-        # Override temperature to 0.0 for enrichment (deterministic)
         sampling["temperature"] = 0.0
 
         body: dict = {
+            "model": self.config.model,
             "messages": messages,
             **sampling,
             "max_tokens": 256,
             "stream": False,
-            "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
+            "extra_body": self._extra_body(enable_thinking),
         }
 
         try:
@@ -190,7 +198,6 @@ class LLMService:
                 data = response.json()
                 result = data["choices"][0]["message"].get("content", "").strip()
 
-                # Diagnostic: single log entry with input and output
                 log_enrichment_call(
                     system_prompt=system,
                     user_prompt=prompt,
@@ -213,11 +220,7 @@ class LLMService:
         enriched_question: str,
         contexts: list[dict],
     ) -> str:
-        """Build a prompt for the document delivery agent.
-
-        The LLM decides which single document is most relevant and outputs
-        a structured tool call to deliver it to the user.
-        """
+        """Build a prompt for the document delivery agent."""
         context_parts = []
         for i, ctx in enumerate(contexts, 1):
             source_info = f"[Source {i}: {ctx['document_name']}"
@@ -279,9 +282,6 @@ ANSWER:"""
 
         context_text = "\n\n---\n\n".join(context_parts)
 
-        # If enriched differs from original, include both so the LLM can
-        # find the information via the enriched terms but answer using the
-        # user's original terminology.
         if enriched_question != original_question:
             question_block = (
                 f"ORIGINAL QUESTION (user terminology): {original_question}\n"

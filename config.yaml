@@ -1,9 +1,9 @@
 # =============================================================================
-# Atlas RAG System - Zentrale Konfiguration
+# Atlas RAG System - Central Configuration
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Server-Konfiguration
+# Server Configuration
 # -----------------------------------------------------------------------------
 server:
   host: "0.0.0.0"
@@ -16,7 +16,7 @@ server:
   log_level: "info"
 
 # -----------------------------------------------------------------------------
-# Datenbank-Konfiguration (PostgreSQL)
+# Database Configuration (PostgreSQL)
 # -----------------------------------------------------------------------------
 database:
   host: "postgres"
@@ -29,10 +29,10 @@ database:
   echo_sql: false
 
 # -----------------------------------------------------------------------------
-# pgvector Konfiguration
+# pgvector Configuration
 # -----------------------------------------------------------------------------
 vector:
-  dimensions: 1024
+  dimensions: 4096
   index_type: "ivfflat"
   distance_metric: "cosine"
   ivfflat_lists: 100
@@ -41,11 +41,12 @@ vector:
   probes: 10
 
 # -----------------------------------------------------------------------------
-# LLM-Konfiguration (llama.cpp OpenAI-kompatible API)
+# LLM Configuration (vLLM OpenAI-compatible API)
+# Model: Qwen3.5-35B-A3B (Mixture-of-Experts, ~3.5B active parameters)
 # -----------------------------------------------------------------------------
 llm:
-  base_url: "http://llama-cpp:8080"
-  model: "Qwen3.5-35B-A3B-UD-IQ3_S.gguf"
+  base_url: "http://vllm-llm:8080"
+  model: "Qwen/Qwen3.5-35B-A3B"
   max_tokens: 65536
   context_window: 65536
   timeout: 120
@@ -76,26 +77,28 @@ llm:
     Answer in the same language the user asks in.
 
 # -----------------------------------------------------------------------------
-# Embedding-Konfiguration (llama.cpp Embedding Server)
+# Embedding Configuration (vLLM Embedding Server, GPU-accelerated)
+# Model: pplx-embed-context-4b (4B parameters, high-quality contextual embeddings)
 # -----------------------------------------------------------------------------
 embedding:
-  base_url: "http://llama-cpp-embed:8081"
-  model: "pplx-embed-context-v1-0.6b-q8_0.gguf"
+  base_url: "http://vllm-embed:8081"
+  model: "pplx-ai/pplx-embed-context-4b"
   batch_size: 32
   max_retries: 3
-  timeout: 120  # Higher timeout — embedding runs on CPU
+  timeout: 60
 
 # -----------------------------------------------------------------------------
-# VLM-OCR (Vision-Language Model for layout-aware OCR, runs on llama-cpp-vlm)
+# VLM-OCR (Vision-Language Model for layout-aware OCR, GPU-accelerated)
+# Model: Qianfan-OCR (Layout-as-thought reasoning for structured text extraction)
 # Layout-as-thought: the model first analyzes page structure (headers, tables,
 # columns, lists) then extracts text in logical reading order.
 # -----------------------------------------------------------------------------
 vlm_ocr:
   enabled: true
-  base_url: "http://llama-cpp-vlm:8082"
-  model: "Qianfan-OCR-Q8_0.gguf"
-  timeout: 600  # Read timeout (seconds) — VLM generates ~13 tok/s on CPU
-  max_tokens: 16384  # Must cover thinking + OCR output (model ctx is 32768)
+  base_url: "http://vllm-ocr:8082"
+  model: "stepfun-ai/Qianfan-OCR"
+  timeout: 120  # GPU inference is much faster than CPU
+  max_tokens: 16384
   max_image_size_px: 2048
   dpi: 300
   layout_as_thought: true
@@ -109,7 +112,7 @@ vlm_ocr:
     Output ONLY the extracted document text — no commentary.
 
 # -----------------------------------------------------------------------------
-# Dokument-Verarbeitung (Chunking)
+# Document Processing (Chunking)
 # -----------------------------------------------------------------------------
 chunking:
   strategy: "semantic"
@@ -124,19 +127,19 @@ chunking:
     - " "
 
 # -----------------------------------------------------------------------------
-# Retrieval-Konfiguration
+# Retrieval Configuration
 # -----------------------------------------------------------------------------
 retrieval:
   top_k: 10
   rerank: true
   rerank_model: "ms-marco-MiniLM-L-12-v2"
   rerank_top_k: 5
-  similarity_threshold: 0.3    # Drop chunks below this cosine similarity score
+  similarity_threshold: 0.3
   query_enrichment:
     enabled: true
 
 # -----------------------------------------------------------------------------
-# Unterstützte Dateiformate
+# Supported File Formats
 # -----------------------------------------------------------------------------
 documents:
   supported_formats:
@@ -155,12 +158,12 @@ documents:
   max_file_size_mb: 100
   ocr_enabled: true
   ocr_language: "deu+eng"
-  ocr_backend: "vlm"           # "vlm" (Qianfan-OCR) or "tesseract" (legacy)
-  vlm_always: true             # Use VLM for ALL PDFs (layout-aware chunks), not just scanned ones
+  ocr_backend: "vlm"
+  vlm_always: true
   temp_upload_dir: "/tmp/atlas_uploads"
 
 # -----------------------------------------------------------------------------
-# Authentifizierung & Autorisierung
+# Authentication & Authorization
 # -----------------------------------------------------------------------------
 auth:
   secret_key: "${AUTH_SECRET_KEY}"

@@ -1,13 +1,12 @@
 """
-VLM OCR Service - Vision-Language Model OCR mit Layout-as-thought.
+VLM OCR Service - Vision-Language Model OCR with Layout-as-thought.
 
-Verwendet Qianfan-OCR (oder kompatible VLMs) über llama.cpp, um Dokument-
-Seiten per Vision-Completion zu lesen, statt klassisches Tesseract-OCR.
+Uses Qianfan-OCR (or compatible VLMs) via vLLM with GPU acceleration
+to extract text from document pages using vision completion.
 
-Layout-as-thought: Das Modell analysiert zuerst die räumliche Struktur
-der Seite (Spalten, Tabellen, Überschriften, Lesereihenfolge), bevor
-es den Text extrahiert. Dies verbessert die Textqualität erheblich,
-insbesondere bei komplexen Layouts.
+Layout-as-thought: The model first analyzes the spatial structure of the
+page (columns, tables, headers, reading order) before extracting text.
+This significantly improves text quality, especially for complex layouts.
 """
 
 import base64
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class VlmOcrService:
-    """Extrahiert Text aus Bildern über ein Vision-Language Model."""
+    """Extracts text from images using a Vision-Language Model via vLLM."""
 
     def __init__(self):
         self.config = settings.vlm_ocr
@@ -34,13 +33,13 @@ class VlmOcrService:
 
     @staticmethod
     def _image_to_data_uri(image_bytes: bytes, mime_type: str = "image/png") -> str:
-        """Konvertiert Bilddaten in eine base64-Data-URI."""
+        """Convert image bytes to a base64 data URI."""
         b64 = base64.b64encode(image_bytes).decode("ascii")
         return f"data:{mime_type};base64,{b64}"
 
     @staticmethod
     def _pil_image_to_bytes(image, max_size: int = 2048) -> bytes:
-        """Konvertiert ein PIL-Image zu PNG-Bytes, optional herunterskaliert."""
+        """Convert a PIL Image to PNG bytes, optionally downscaling."""
         w, h = image.size
         if max(w, h) > max_size:
             scale = max_size / max(w, h)
@@ -48,7 +47,7 @@ class VlmOcrService:
                 (int(w * scale), int(h * scale)),
                 getattr(image, "Resampling", image).LANCZOS
                 if hasattr(image, "Resampling")
-                else 1,  # PIL.Image.LANCZOS
+                else 1,
             )
         buf = io.BytesIO()
         image.save(buf, format="PNG")
@@ -56,13 +55,13 @@ class VlmOcrService:
 
     async def ocr_image(self, image) -> str:
         """
-        Extrahiert Text aus einem einzelnen PIL-Image.
+        Extract text from a single PIL Image.
 
         Args:
-            image: PIL.Image.Image Objekt (z.B. eine PDF-Seite)
+            image: PIL.Image.Image object (e.g. a PDF page)
 
         Returns:
-            Extrahierter Text als String
+            Extracted text as string
         """
         img_bytes = self._pil_image_to_bytes(
             image, max_size=self.config.max_image_size_px
@@ -90,7 +89,6 @@ class VlmOcrService:
             ],
             "max_tokens": self.config.max_tokens,
             "temperature": 0.1,
-            "enable_thinking": self.config.layout_as_thought,
         }
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(
@@ -111,8 +109,7 @@ class VlmOcrService:
 
         # When layout_as_thought is on, the model thinks about page layout
         # in reasoning_content and outputs extracted text in content.
-        # If content is empty (e.g. max_tokens exhausted during thinking),
-        # fall back to reasoning_content which may still contain useful text.
+        # If content is empty, fall back to reasoning_content.
         if not text.strip():
             text = message.get("reasoning_content") or ""
 
@@ -120,13 +117,13 @@ class VlmOcrService:
 
     async def ocr_pdf_pages(self, file_path: str) -> tuple[list, list[str]]:
         """
-        Führt VLM-OCR auf allen Seiten eines PDFs durch.
+        Run VLM-OCR on all pages of a PDF.
 
         Args:
-            file_path: Pfad zur PDF-Datei
+            file_path: Path to the PDF file
 
         Returns:
-            Tuple von (ParsedSections-Liste, Volltexte-Liste)
+            Tuple of (ParsedSections list, full text list)
         """
         from pdf2image import convert_from_path
         from app.utils.file_parsers import ParsedSection
@@ -139,7 +136,7 @@ class VlmOcrService:
             total = len(images)
             logger.info(
                 f"VLM-OCR (Layout-as-thought={'ON' if self.config.layout_as_thought else 'OFF'}): "
-                f"{total} Seiten in {file_path}"
+                f"{total} pages in {file_path}"
             )
 
             for i, image in enumerate(images):
@@ -155,17 +152,17 @@ class VlmOcrService:
                         )
                         full_text.append(text.strip())
                         logger.debug(
-                            f"VLM-OCR Seite {i+1}/{total}: {len(text)} Zeichen"
+                            f"VLM-OCR page {i+1}/{total}: {len(text)} chars"
                         )
                     elif text and text.strip():
                         logger.debug(
-                            f"VLM-OCR Seite {i+1}/{total} übersprungen "
-                            f"(zu wenig Text: {len(text.strip())} Zeichen)"
+                            f"VLM-OCR page {i+1}/{total} skipped "
+                            f"(too little text: {len(text.strip())} chars)"
                         )
                 except Exception as e:
-                    logger.warning(f"VLM-OCR Seite {i+1}/{total} fehlgeschlagen: {e}")
+                    logger.warning(f"VLM-OCR page {i+1}/{total} failed: {e}")
 
         except Exception as e:
-            logger.error(f"VLM-OCR Fehler für {file_path}: {e}")
+            logger.error(f"VLM-OCR error for {file_path}: {e}")
 
         return sections, full_text
