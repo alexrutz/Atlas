@@ -59,9 +59,6 @@ class DocumentProcessor:
             return
 
         try:
-            document.processing_status = "processing"
-            await self.db.flush()
-
             # 2. Datei parsen (non-blocking: offloaded to thread pool)
             logger.info(f"Parse Dokument: {document.original_name}")
             parsed = await self._parse(document.file_path, document.file_type)

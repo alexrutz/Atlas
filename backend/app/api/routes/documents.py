@@ -29,6 +29,24 @@ async def process_document_task(document_id: int) -> None:
     logger = logging.getLogger(__name__)
     logger.info(f"Starte Hintergrund-Verarbeitung für Dokument {document_id}")
     from app.services.document_processor import DocumentProcessor
+
+    # Commit "processing" status immediately in its own transaction so
+    # polling clients see the status change right away (flush alone is
+    # invisible to other sessions).
+    try:
+        async with async_session() as status_db:
+            result = await status_db.execute(
+                _select(Document).where(Document.id == document_id)
+            )
+            doc = result.scalar_one_or_none()
+            if not doc:
+                logger.error(f"Dokument {document_id} nicht gefunden")
+                return
+            doc.processing_status = "processing"
+            await status_db.commit()
+    except Exception as e:
+        logger.error(f"Konnte Verarbeitungsstatus nicht setzen: {e}")
+
     try:
         async with async_session() as db:
             processor = DocumentProcessor(db)

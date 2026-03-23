@@ -109,7 +109,12 @@ class VlmOcrService:
             "temperature": 0.1,
         }
 
-        async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(
+            connect=30.0,
+            read=float(self.config.timeout),
+            write=30.0,
+            pool=30.0,
+        )) as client:
             response = await client.post(
                 f"{self.base_url}/v1/chat/completions",
                 json=payload,
