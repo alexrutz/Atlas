@@ -24,18 +24,52 @@ router = APIRouter()
 async def process_document_task(document_id: int) -> None:
     """Background-Task: Dokument verarbeiten (Parsing, Chunking, Embedding)."""
     import logging
+    from sqlalchemy import select as _select
+    from app.models.document import Document
     logger = logging.getLogger(__name__)
     logger.info(f"Starte Hintergrund-Verarbeitung für Dokument {document_id}")
     from app.services.document_processor import DocumentProcessor
-    async with async_session() as db:
-        try:
+
+    # Commit "processing" status immediately in its own transaction so
+    # polling clients see the status change right away (flush alone is
+    # invisible to other sessions).
+    try:
+        async with async_session() as status_db:
+            result = await status_db.execute(
+                _select(Document).where(Document.id == document_id)
+            )
+            doc = result.scalar_one_or_none()
+            if not doc:
+                logger.error(f"Dokument {document_id} nicht gefunden")
+                return
+            doc.processing_status = "processing"
+            await status_db.commit()
+    except Exception as e:
+        logger.error(f"Konnte Verarbeitungsstatus nicht setzen: {e}")
+
+    try:
+        async with async_session() as db:
             processor = DocumentProcessor(db)
             await processor.process(document_id)
             await db.commit()
             logger.info(f"Dokument {document_id} erfolgreich verarbeitet")
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"Fehler bei Verarbeitung von Dokument {document_id}: {e}")
+    except Exception as e:
+        logger.error(f"Fehler bei Verarbeitung von Dokument {document_id}: {e}", exc_info=True)
+        # Save error status in a fresh session — the main session was rolled back
+        # (SQLAlchemy auto-rolls back on context manager exit after exception),
+        # which would otherwise leave the document stuck in "processing" forever.
+        try:
+            async with async_session() as err_db:
+                result = await err_db.execute(
+                    _select(Document).where(Document.id == document_id)
+                )
+                doc = result.scalar_one_or_none()
+                if doc:
+                    doc.processing_status = "error"
+                    doc.processing_error = str(e)
+                    await err_db.commit()
+        except Exception as inner:
+            logger.error(f"Konnte Fehlerstatus für Dokument {document_id} nicht speichern: {inner}")
 
 
 @router.get("/collections/{collection_id}/documents", response_model=list[DocumentResponse])
@@ -107,8 +141,6 @@ async def upload_document(
     db.add(document)
     await db.flush()
     await db.refresh(document)
-
-    await db.flush()
 
     # Hintergrund-Verarbeitung starten
     background_tasks.add_task(process_document_task, document.id)

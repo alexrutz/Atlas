@@ -62,10 +62,36 @@ def parse_document(file_path: str, file_type: str) -> ParsedDocument:
 
 
 def _parse_pdf(file_path: str) -> ParsedDocument:
-    """Parst ein PDF-Dokument. Fällt auf OCR zurück, wenn kein Text extrahiert werden kann."""
+    """Parst ein PDF-Dokument.
+
+    Wenn vlm_always aktiviert ist, wird VLM-OCR für ALLE PDFs verwendet
+    (bessere Strukturerkennung bei Tabellen, Spalten, Überschriften).
+    Andernfalls wird VLM/Tesseract nur als Fallback für gescannte PDFs genutzt.
+    """
     from pypdf import PdfReader
+    from app.core.config import settings
 
     reader = PdfReader(file_path)
+    page_count = len(reader.pages)
+
+    # --- VLM-always-Modus: VLM für alle PDFs (layout-aware Chunks) ---
+    use_vlm_always = (
+        settings.documents.vlm_always
+        and settings.documents.ocr_backend == "vlm"
+        and settings.vlm_ocr.enabled
+    )
+    if use_vlm_always:
+        logger.info(f"VLM-always: Verarbeite PDF mit Layout-aware OCR: {file_path}")
+        vlm_sections, vlm_text = _vlm_ocr_pdf(file_path)
+        if vlm_text:
+            return ParsedDocument(
+                text="\n\n".join(vlm_text),
+                sections=vlm_sections,
+                page_count=page_count,
+            )
+        logger.warning(f"VLM-always lieferte keinen Text, Fallback auf pypdf: {file_path}")
+
+    # --- Standard-Modus: Text mit pypdf extrahieren ---
     sections = []
     full_text = []
 
@@ -81,15 +107,20 @@ def _parse_pdf(file_path: str) -> ParsedDocument:
 
     # Wenn kein Text extrahiert wurde (z.B. gescannte Dokumente), OCR verwenden
     if not full_text:
-        from app.core.config import settings
         if settings.documents.ocr_enabled:
             logger.info(f"Kein Text in PDF gefunden, starte OCR für: {file_path}")
-            ocr_sections, ocr_text = _ocr_pdf(file_path, settings.documents.ocr_language)
+
+            backend = getattr(settings.documents, "ocr_backend", "tesseract")
+            if backend == "vlm" and settings.vlm_ocr.enabled:
+                ocr_sections, ocr_text = _vlm_ocr_pdf(file_path)
+            else:
+                ocr_sections, ocr_text = _ocr_pdf(file_path, settings.documents.ocr_language)
+
             if ocr_text:
                 return ParsedDocument(
                     text="\n\n".join(ocr_text),
                     sections=ocr_sections,
-                    page_count=len(reader.pages),
+                    page_count=page_count,
                 )
             logger.warning(f"OCR konnte keinen Text extrahieren: {file_path}")
         else:
@@ -98,7 +129,7 @@ def _parse_pdf(file_path: str) -> ParsedDocument:
     return ParsedDocument(
         text="\n\n".join(full_text),
         sections=sections,
-        page_count=len(reader.pages),
+        page_count=page_count,
     )
 
 
@@ -162,6 +193,38 @@ def _ocr_pdf(file_path: str, ocr_language: str = "deu+eng") -> tuple[list[Parsed
         logger.error(f"OCR-Fehler: {e}")
 
     return sections, full_text
+
+
+def _vlm_ocr_pdf(file_path: str) -> tuple[list[ParsedSection], list[str]]:
+    """Führt VLM-OCR (Layout-as-thought) auf allen Seiten eines PDFs durch.
+
+    Verwendet den VlmOcrService asynchron. Da file_parsers synchron aufgerufen
+    wird, wird ein neuer Event-Loop gestartet falls nötig.
+    """
+    import asyncio
+
+    try:
+        from app.services.vlm_ocr_service import VlmOcrService
+        service = VlmOcrService()
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # Bereits in einem async-Kontext → neuen Thread nutzen
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, service.ocr_pdf_pages(file_path))
+                return future.result()
+        else:
+            return asyncio.run(service.ocr_pdf_pages(file_path))
+
+    except Exception as e:
+        logger.error(f"VLM-OCR fehlgeschlagen, Fallback auf Tesseract: {e}")
+        from app.core.config import settings
+        return _ocr_pdf(file_path, settings.documents.ocr_language)
 
 
 def _parse_docx(file_path: str) -> ParsedDocument:

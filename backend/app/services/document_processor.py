@@ -3,8 +3,10 @@ Document Processor - Parsing und Chunking von Dokumenten.
 
 Unterstützt verschiedene Dateiformate und Chunking-Strategien.
 Chunks werden direkt mit ihrem Originaltext embedded.
+Scanned-PDF OCR nutzt Qianfan-OCR VLM mit Layout-as-thought (konfigurierbar).
 """
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -15,7 +17,7 @@ from app.core.config import settings
 from app.models.document import Document
 from app.models.chunk import Chunk
 from app.services.embedding_service import EmbeddingService
-from app.utils.file_parsers import parse_document
+from app.utils.file_parsers import parse_document, ParsedDocument
 from app.utils.text_processing import chunk_text
 
 logger = logging.getLogger(__name__)
@@ -28,13 +30,22 @@ class DocumentProcessor:
         self.db = db
         self.embedding = EmbeddingService()
 
+    async def _parse(self, file_path: str, file_type: str) -> ParsedDocument:
+        """Parst ein Dokument ohne den Event-Loop zu blockieren.
+
+        parse_document kann über _vlm_ocr_pdf intern blocking I/O (ThreadPoolExecutor
+        + future.result()) ausführen. Deshalb wird es in einem Thread-Pool ausgeführt,
+        damit der Event-Loop für andere Requests frei bleibt.
+        """
+        return await asyncio.to_thread(parse_document, file_path, file_type)
+
     async def process(self, document_id: int) -> None:
         """
         Vollständige Verarbeitung eines Dokuments.
 
         Ablauf:
         1. Dokument aus DB laden
-        2. Datei parsen (Text extrahieren)
+        2. Datei parsen (Text extrahieren, ggf. VLM-OCR)
         3. Text in Chunks aufteilen
         4. Embedding für jeden Chunk berechnen
         5. Chunks mit Embeddings in DB speichern
@@ -48,12 +59,9 @@ class DocumentProcessor:
             return
 
         try:
-            document.processing_status = "processing"
-            await self.db.flush()
-
-            # 2. Datei parsen
+            # 2. Datei parsen (non-blocking: offloaded to thread pool)
             logger.info(f"Parse Dokument: {document.original_name}")
-            parsed = parse_document(document.file_path, document.file_type)
+            parsed = await self._parse(document.file_path, document.file_type)
 
             # 3. Text in Chunks aufteilen
             logger.info(f"Chunking mit Strategie: {settings.chunking.strategy}")

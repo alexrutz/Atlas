@@ -17,7 +17,7 @@ Atlas is a fully **on-premises** Retrieval-Augmented Generation (RAG) system for
 | **Editable Prompts** | RAG, enrichment, and free chat system prompts editable live from the admin panel |
 | **Permission System** | Users → Groups → Collections multi-level access control |
 | **Docker Management** | Admin panel for managing Atlas containers, images, and volumes |
-| **Multi-format OCR** | PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, HTML, XML, JSON - with OCR for scanned PDFs |
+| **Multi-format OCR** | PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, HTML, XML, JSON - with Qianfan-OCR Layout-as-thought VLM for scanned PDFs (tesseract fallback) |
 | **Conversation History** | Every conversation is persisted and resumable |
 | **LLM Diagnostics** | Color-coded diagnostic log container shows all LLM inputs/outputs in real time |
 | **Containerized** | One-command startup with Docker Compose |
@@ -37,7 +37,7 @@ FastAPI Backend (port 8000)
     │
     ├── PostgreSQL 16 + pgvector (port 5432)
     ├── llama.cpp LLM Server (port 8080) — Qwen3.5-35B-A3B, 65K context
-    ├── llama.cpp Embedding Server (port 8081) — pplx-embed-context-v1, 1024 dims
+    ├── llama.cpp Embedding Server (port 8081) — Qianfan-OCR 4B, Layout-as-thought VLM
     └── Docker Socket (container management)
 
 LLM Diagnostic Sidecar (tails colored log output)
@@ -54,7 +54,8 @@ cd Atlas
 
 # 2. Place models in ../models/ (one level above the repo)
 #    - Qwen3.5-35B-A3B-UD-IQ3_S.gguf       (LLM)
-#    - pplx-embed-context-v1-0.6b-q8_0.gguf  (Embedding, 1024 dimensions)
+#    - Qianfan-OCR-Q8_0.gguf                  (Embedding + VLM OCR)
+#    - mmproj-Qianfan-OCR-Q8_0.gguf           (Vision projector for Qianfan-OCR)
 
 # 3. Start all services (first run builds frontend + backend images)
 docker compose up -d --build
@@ -85,7 +86,7 @@ openssl rand -hex 32
 |---|---|---|---|
 | PostgreSQL + pgvector | `atlas-postgres` | 5432 | Vector database with 1024-dim embeddings |
 | llama.cpp LLM | `atlas-llama-cpp` | 8080 | Chat completion API (65K context, CUDA) |
-| llama.cpp Embedding | `atlas-llama-cpp-embed` | 8081 | Embedding API (32K context, CUDA) |
+| llama.cpp Embedding | `atlas-llama-cpp-embed` | 8081 | Embedding + VLM OCR API (Qianfan-OCR, Layout-as-thought, CUDA) |
 | FastAPI Backend | `atlas-backend` | 8000 | API server |
 | React Frontend + Nginx | `atlas-frontend` | 3000 | Web UI |
 | LLM Diagnostic | `atlas-llm-diagnostic` | — | Tails colored diagnostic logs |

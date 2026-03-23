@@ -40,10 +40,6 @@ class DatabaseConfig(BaseModel):
     def async_url(self) -> str:
         return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
 
-    @property
-    def sync_url(self) -> str:
-        return f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
-
 
 class VectorConfig(BaseModel):
     dimensions: int = 1024
@@ -91,7 +87,27 @@ class EmbeddingConfig(BaseModel):
     model: str = "pplx-embed-context-v1-0.6b-q8_0.gguf"
     batch_size: int = 32
     max_retries: int = 3
-    timeout: int = 60
+    timeout: int = 120  # Higher timeout — embedding runs on CPU
+
+
+class VlmOcrConfig(BaseModel):
+    enabled: bool = True
+    base_url: str = "http://llama-cpp-vlm:8082"
+    model: str = "Qianfan-OCR-Q8_0.gguf"
+    timeout: int = 600  # Read timeout in seconds — VLM generates ~13 tok/s on CPU
+    max_tokens: int = 16384  # Must be large enough for thinking + OCR output
+    max_image_size_px: int = 2048
+    dpi: int = 300
+    layout_as_thought: bool = True
+    system_prompt: str = (
+        "You are a precise document OCR engine with Layout-as-thought reasoning.\n"
+        "First, analyze the spatial layout of the page: identify columns, headers,\n"
+        "footers, tables, lists, captions, and reading order.\n"
+        "Then, extract ALL text faithfully in logical reading order.\n"
+        "Preserve paragraph breaks and structural hierarchy.\n"
+        "For tables, render them in markdown table format.\n"
+        "Output ONLY the extracted document text — no commentary."
+    )
 
 
 class ChunkingConfig(BaseModel):
@@ -118,8 +134,6 @@ class RetrievalConfig(BaseModel):
     rerank_model: str = "ms-marco-MiniLM-L-12-v2"
     rerank_top_k: int = 5
     similarity_threshold: float = 0.3  # Drop chunks below this cosine similarity
-    hybrid_search: bool = False  # Deprecated, ignored — pure vector search is used
-    hybrid_alpha: float = 0.7  # Deprecated, ignored
     query_enrichment: QueryEnrichmentConfig = QueryEnrichmentConfig()
 
 
@@ -128,6 +142,8 @@ class DocumentsConfig(BaseModel):
     max_file_size_mb: int = 100
     ocr_enabled: bool = True
     ocr_language: str = "deu+eng"
+    ocr_backend: str = "vlm"  # "vlm" (Qianfan-OCR) or "tesseract" (legacy)
+    vlm_always: bool = True  # Use VLM for ALL PDFs (layout-aware), not just scanned ones
     temp_upload_dir: str = "/tmp/atlas_uploads"
 
 
@@ -156,6 +172,7 @@ class Settings(BaseModel):
     vector: VectorConfig = VectorConfig()
     llm: LLMConfig = LLMConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
+    vlm_ocr: VlmOcrConfig = VlmOcrConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
     documents: DocumentsConfig = DocumentsConfig()
