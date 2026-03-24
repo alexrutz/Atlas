@@ -221,7 +221,6 @@ def _get_converter():
             InputFormat.PPTX,
             InputFormat.XLSX,
             InputFormat.HTML,
-            InputFormat.XML,
             InputFormat.CSV,
             InputFormat.MD,
             InputFormat.ASCIIDOC,
@@ -311,7 +310,10 @@ def _analyze_document(doc) -> tuple[list[SectionResponse], DocumentStats]:
             if hasattr(item, "text"):
                 text = item.text or ""
             elif hasattr(item, "export_to_markdown"):
-                text = item.export_to_markdown()
+                try:
+                    text = item.export_to_markdown(doc)
+                except TypeError:
+                    text = item.export_to_markdown()
 
             if not text.strip():
                 continue
@@ -534,7 +536,7 @@ async def convert(
     """
     Parse and chunk a document using the Docling ML pipeline.
 
-    Accepts: PDF, DOCX, XLSX, PPTX, HTML, XML, CSV, MD, AsciiDoc, images.
+    Accepts: PDF, DOCX, XLSX, PPTX, HTML, CSV, MD, AsciiDoc, images.
 
     The pipeline:
     1. **Layout analysis** detects headings, tables, figures, lists, code blocks

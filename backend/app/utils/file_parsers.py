@@ -103,9 +103,9 @@ _RETRY_DELAY = 3.0
 def _parse_with_docling_api(file_path: str, file_type: str) -> ParsedDocument:
     """Parse a document via the Docling API service.
 
-    Automatically passes the embedding model name as the tokenizer so that
-    HybridChunker token counts align with the actual embedding model.
-    Retries once on transient failures.
+    Passes the configured tokenizer (docling.tokenizer in config.yaml) to the
+    HybridChunker; if unset, docling-api falls back to bert-base-uncased.
+    Retries on transient failures.
     """
     from app.core.config import settings
 
@@ -116,8 +116,8 @@ def _parse_with_docling_api(file_path: str, file_type: str) -> ParsedDocument:
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    # Use embedding model as tokenizer for accurate token counting
-    tokenizer = cfg.tokenizer or settings.embedding.model
+    # Use explicitly configured tokenizer; if unset, let docling-api use its default
+    tokenizer = cfg.tokenizer
 
     with open(path, "rb") as f:
         file_bytes = f.read()

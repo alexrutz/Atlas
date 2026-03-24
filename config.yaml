@@ -32,8 +32,8 @@ database:
 # pgvector Configuration
 # -----------------------------------------------------------------------------
 vector:
-  dimensions: 4096
-  index_type: "ivfflat"
+  dimensions: 1024
+  index_type: "hnsw"
   distance_metric: "cosine"
   ivfflat_lists: 100
   hnsw_m: 16
@@ -41,12 +41,12 @@ vector:
   probes: 10
 
 # -----------------------------------------------------------------------------
-# LLM Configuration (vLLM OpenAI-compatible API)
-# Model: Qwen3.5-35B-A3B (Mixture-of-Experts, ~3.5B active parameters)
+# LLM Configuration (llama-server OpenAI-compatible API)
+# Model: GGUF file configured via LLM_MODEL_FILE in .env
 # -----------------------------------------------------------------------------
 llm:
-  base_url: "http://vllm-llm:8080"
-  model: "Qwen/Qwen3.5-35B-A3B"
+  base_url: "http://llama-llm:8080"
+  model: "llm"
   max_tokens: 65536
   context_window: 65536
   timeout: 120
@@ -77,12 +77,12 @@ llm:
     Answer in the same language the user asks in.
 
 # -----------------------------------------------------------------------------
-# Embedding Configuration (vLLM Embedding Server, GPU-accelerated)
-# Model: pplx-embed-context-4b (4B parameters, high-quality contextual embeddings)
+# Embedding Configuration (llama-server, GPU-accelerated)
+# Model: GGUF file configured via EMBED_MODEL_FILE in .env
 # -----------------------------------------------------------------------------
 embedding:
-  base_url: "http://vllm-embed:8081"
-  model: "pplx-ai/pplx-embed-context-4b"
+  base_url: "http://llama-embed:8081"
+  model: "embed"
   batch_size: 32
   max_retries: 3
   timeout: 60
