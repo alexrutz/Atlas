@@ -4,9 +4,10 @@ Docling API - Document parsing and chunking as a REST service.
 Wraps the Docling ML pipeline behind an HTTP API:
 - Layout analysis (DocLayNet model) for page element detection
 - TableFormer for table structure recognition
-- OCR (EasyOCR or Tesseract) for scanned documents
+- OCR (auto-selected: EasyOCR, Tesseract, or RapidOCR) for scanned documents
 - Code enrichment for code block detection
-- HybridChunker for token-aware, structure-preserving chunking
+- HybridChunker for token-aware, structure-preserving chunking with
+  table header repetition for better RAG embedding quality
 - Image/figure extraction from documents
 
 The main Atlas backend calls this service via HTTP, keeping ML dependencies
@@ -79,6 +80,11 @@ class PipelineInfoResponse(BaseModel):
     table_mode: str
     code_enrichment: bool
     accelerator_device: str
+    flash_attention: bool
+    ocr_batch_size: int
+    layout_batch_size: int
+    table_batch_size: int
+    document_timeout: float | None
     supported_formats: list[str]
 
 
@@ -90,16 +96,40 @@ def _env_bool(key: str, default: bool = True) -> bool:
     return os.environ.get(key, str(default)).lower() in ("true", "1", "yes")
 
 
+def _env_int(key: str, default: int) -> int:
+    try:
+        return int(os.environ.get(key, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
+def _env_float(key: str, default: float) -> float:
+    try:
+        return float(os.environ.get(key, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
+# Pipeline configuration from environment
 OCR_ENABLED = _env_bool("DOCLING_DO_OCR", True)
-OCR_BACKEND = os.environ.get("DOCLING_OCR_BACKEND", "easyocr")  # easyocr or tesseract
+OCR_BACKEND = os.environ.get("DOCLING_OCR_BACKEND", "auto")  # auto, easyocr, tesseract
 TABLE_STRUCTURE = _env_bool("DOCLING_DO_TABLE_STRUCTURE", True)
 TABLE_MODE = os.environ.get("DOCLING_TABLE_MODE", "fast")
 CODE_ENRICHMENT = _env_bool("DOCLING_DO_CODE_ENRICHMENT", True)
 ACCELERATOR_DEVICE = os.environ.get("DOCLING_ACCELERATOR_DEVICE", "auto")
-IMAGES_SCALE = float(os.environ.get("DOCLING_IMAGES_SCALE", "2.0"))
+FLASH_ATTENTION = _env_bool("DOCLING_FLASH_ATTENTION", False)
+IMAGES_SCALE = _env_float("DOCLING_IMAGES_SCALE", 2.0)
 GENERATE_PICTURES = _env_bool("DOCLING_GENERATE_PICTURES", False)
 DEFAULT_TOKENIZER = os.environ.get("DOCLING_DEFAULT_TOKENIZER", "")
 OCR_LANG = os.environ.get("DOCLING_OCR_LANG", "")  # comma-separated, e.g. "de,en"
+
+# Batch sizes for GPU throughput tuning
+OCR_BATCH_SIZE = _env_int("DOCLING_OCR_BATCH_SIZE", 4)
+LAYOUT_BATCH_SIZE = _env_int("DOCLING_LAYOUT_BATCH_SIZE", 4)
+TABLE_BATCH_SIZE = _env_int("DOCLING_TABLE_BATCH_SIZE", 4)
+
+# Timeout (seconds) per document to prevent runaway conversions
+DOCUMENT_TIMEOUT = _env_float("DOCLING_DOCUMENT_TIMEOUT", 300.0)  # 5 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -123,33 +153,41 @@ def _get_converter():
     from docling.datamodel.pipeline_options import (
         PdfPipelineOptions,
         TableFormerMode,
-        EasyOcrOptions,
-        TesseractOcrOptions,
+        TableStructureOptions,
         AcceleratorOptions,
+        AcceleratorDevice,
     )
     from docling.datamodel.base_models import InputFormat
 
+    # --- Accelerator options ---
+    accel_opts = AcceleratorOptions()
+    if ACCELERATOR_DEVICE != "auto":
+        accel_opts.device = ACCELERATOR_DEVICE
+    if FLASH_ATTENTION:
+        accel_opts.cuda_use_flash_attention2 = True
+        logger.info("Flash Attention 2: enabled (requires Ampere+ GPU)")
+
     # --- PDF pipeline options ---
     pipeline_opts = PdfPipelineOptions()
+    pipeline_opts.accelerator_options = accel_opts
     pipeline_opts.do_ocr = OCR_ENABLED
     pipeline_opts.do_table_structure = TABLE_STRUCTURE
     pipeline_opts.images_scale = IMAGES_SCALE
     pipeline_opts.generate_picture_images = GENERATE_PICTURES
 
-    # OCR backend
+    # Document timeout
+    if DOCUMENT_TIMEOUT > 0:
+        pipeline_opts.document_timeout = DOCUMENT_TIMEOUT
+
+    # GPU batch sizes for throughput
+    pipeline_opts.ocr_batch_size = OCR_BATCH_SIZE
+    pipeline_opts.layout_batch_size = LAYOUT_BATCH_SIZE
+    pipeline_opts.table_batch_size = TABLE_BATCH_SIZE
+
+    # OCR backend configuration
     if OCR_ENABLED:
-        if OCR_BACKEND == "tesseract":
-            ocr_opts = TesseractOcrOptions()
-            if OCR_LANG:
-                ocr_opts.lang = [l.strip() for l in OCR_LANG.split(",")]
-            pipeline_opts.ocr_options = ocr_opts
-            logger.info(f"OCR backend: Tesseract (lang={ocr_opts.lang})")
-        else:
-            ocr_opts = EasyOcrOptions()
-            if OCR_LANG:
-                ocr_opts.lang = [l.strip() for l in OCR_LANG.split(",")]
-            pipeline_opts.ocr_options = ocr_opts
-            logger.info(f"OCR backend: EasyOCR (lang={ocr_opts.lang})")
+        lang_list = [l.strip() for l in OCR_LANG.split(",") if l.strip()] if OCR_LANG else []
+        _configure_ocr(pipeline_opts, lang_list)
 
     # Code enrichment
     if CODE_ENRICHMENT:
@@ -162,15 +200,14 @@ def _get_converter():
     # Table structure mode
     if TABLE_STRUCTURE:
         if TABLE_MODE == "accurate":
-            pipeline_opts.table_structure_options.mode = TableFormerMode.ACCURATE
+            pipeline_opts.table_structure_options = TableStructureOptions(
+                mode=TableFormerMode.ACCURATE
+            )
         else:
-            pipeline_opts.table_structure_options.mode = TableFormerMode.FAST
+            pipeline_opts.table_structure_options = TableStructureOptions(
+                mode=TableFormerMode.FAST
+            )
         logger.info(f"Table structure: {TABLE_MODE} mode")
-
-    # Accelerator
-    if ACCELERATOR_DEVICE != "auto":
-        pipeline_opts.accelerator_options = AcceleratorOptions(device=ACCELERATOR_DEVICE)
-        logger.info(f"Accelerator device: {ACCELERATOR_DEVICE}")
 
     # --- Build converter with format options ---
     format_options = {
@@ -196,12 +233,66 @@ def _get_converter():
     elapsed = time.time() - t0
     _init_done = True
     logger.info(f"Docling DocumentConverter initialized in {elapsed:.1f}s")
+    logger.info(
+        f"Config: ocr={OCR_ENABLED} ({OCR_BACKEND}), tables={TABLE_STRUCTURE} ({TABLE_MODE}), "
+        f"code={CODE_ENRICHMENT}, device={ACCELERATOR_DEVICE}, flash_attn={FLASH_ATTENTION}, "
+        f"batch_sizes=ocr:{OCR_BATCH_SIZE}/layout:{LAYOUT_BATCH_SIZE}/table:{TABLE_BATCH_SIZE}, "
+        f"timeout={DOCUMENT_TIMEOUT}s"
+    )
     return _converter
+
+
+def _configure_ocr(pipeline_opts, lang_list: list[str]):
+    """Configure the OCR backend based on environment settings."""
+    if OCR_BACKEND == "tesseract":
+        from docling.datamodel.pipeline_options import TesseractCliOcrOptions
+        ocr_opts = TesseractCliOcrOptions()
+        if lang_list:
+            ocr_opts.lang = lang_list
+        pipeline_opts.ocr_options = ocr_opts
+        logger.info(f"OCR backend: Tesseract CLI (lang={ocr_opts.lang})")
+
+    elif OCR_BACKEND == "easyocr":
+        from docling.datamodel.pipeline_options import EasyOcrOptions
+        ocr_opts = EasyOcrOptions()
+        if lang_list:
+            ocr_opts.lang = lang_list
+        pipeline_opts.ocr_options = ocr_opts
+        logger.info(f"OCR backend: EasyOCR (lang={ocr_opts.lang})")
+
+    else:
+        # "auto" — let Docling pick the best available engine
+        try:
+            from docling.datamodel.pipeline_options import OcrAutoOptions
+            ocr_opts = OcrAutoOptions()
+            if lang_list:
+                ocr_opts.lang = lang_list
+            pipeline_opts.ocr_options = ocr_opts
+            logger.info(f"OCR backend: auto-select (lang={ocr_opts.lang})")
+        except ImportError:
+            from docling.datamodel.pipeline_options import EasyOcrOptions
+            ocr_opts = EasyOcrOptions()
+            if lang_list:
+                ocr_opts.lang = lang_list
+            pipeline_opts.ocr_options = ocr_opts
+            logger.info(f"OCR backend: EasyOCR fallback (lang={ocr_opts.lang})")
 
 
 # ---------------------------------------------------------------------------
 # Document analysis helpers
 # ---------------------------------------------------------------------------
+
+def _get_label_str(item) -> str:
+    """Extract a normalized label string from a document item."""
+    label = getattr(item, "label", None)
+    if label is None:
+        return ""
+    if hasattr(label, "value"):
+        return str(label.value).lower()
+    if hasattr(label, "name"):
+        return label.name.lower()
+    return str(label).lower()
+
 
 def _analyze_document(doc) -> tuple[list[SectionResponse], DocumentStats]:
     """Extract sections and statistics from a DoclingDocument."""
@@ -213,17 +304,8 @@ def _analyze_document(doc) -> tuple[list[SectionResponse], DocumentStats]:
         for item, _level in doc.iterate_items():
             text = ""
             page_number = None
-            label_str = ""
 
-            # Get element label
-            label = getattr(item, "label", None)
-            if label is not None:
-                label_str = str(label).lower() if not isinstance(label, str) else label.lower()
-                # For enum-style labels, extract the value name
-                if hasattr(label, "value"):
-                    label_str = str(label.value).lower()
-                elif hasattr(label, "name"):
-                    label_str = label.name.lower()
+            label_str = _get_label_str(item)
 
             # Get text content
             if hasattr(item, "text"):
@@ -239,7 +321,7 @@ def _analyze_document(doc) -> tuple[list[SectionResponse], DocumentStats]:
             if prov and len(prov) > 0:
                 page_number = getattr(prov[0], "page_no", None)
 
-            # Track stats
+            # Track stats and decide on section headers
             if "heading" in label_str or "title" in label_str:
                 stats.num_headings += 1
                 current_heading = text.strip()
@@ -257,7 +339,7 @@ def _analyze_document(doc) -> tuple[list[SectionResponse], DocumentStats]:
 
             # Build section header from heading hierarchy
             header = current_heading
-            parent_headings = _get_parent_headings(doc, item)
+            parent_headings = _get_parent_headings(item)
             if parent_headings:
                 header = " > ".join(parent_headings)
 
@@ -277,7 +359,7 @@ def _analyze_document(doc) -> tuple[list[SectionResponse], DocumentStats]:
     return sections, stats
 
 
-def _get_parent_headings(doc, item) -> list[str]:
+def _get_parent_headings(item) -> list[str]:
     """Walk up the document tree to collect parent heading texts."""
     headings = []
     try:
@@ -286,8 +368,7 @@ def _get_parent_headings(doc, item) -> list[str]:
             parent = getattr(current, "parent", None)
             if parent is None:
                 break
-            parent_label = getattr(parent, "label", None) or ""
-            label_str = str(parent_label).lower()
+            label_str = _get_label_str(parent)
             if "heading" in label_str or "title" in label_str:
                 parent_text = getattr(parent, "text", "") or ""
                 if parent_text.strip():
@@ -314,12 +395,35 @@ def _get_page_count(doc) -> int | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Token counting helper
+# ---------------------------------------------------------------------------
+
+_tokenizer_cache: dict[str, object] = {}
+
+
+def _count_tokens(text: str, tokenizer_name: str) -> int:
+    """Count tokens using the specified tokenizer, with caching."""
+    try:
+        if tokenizer_name not in _tokenizer_cache:
+            from docling_core.transforms.chunker.tokenizer.huggingface import (
+                HuggingFaceTokenizer,
+            )
+            _tokenizer_cache[tokenizer_name] = HuggingFaceTokenizer(tokenizer_name)
+        return _tokenizer_cache[tokenizer_name].count_tokens(text)
+    except Exception:
+        return len(text) // 4  # Rough estimate
+
+
+# ---------------------------------------------------------------------------
+# Chunking
+# ---------------------------------------------------------------------------
+
 def _chunk_document(
     doc,
     max_tokens: int,
     merge_peers: bool,
     tokenizer: str,
-    include_labels: bool = True,
 ) -> list[ChunkResponse]:
     """Chunk a DoclingDocument using HybridChunker.
 
@@ -328,6 +432,7 @@ def _chunk_document(
     2. Oversized elements split by token count
     3. Undersized adjacent peers merged (if merge_peers=True)
     4. Contextualize adds heading/caption prefixes for embedding
+    5. Table headers repeated when tables span multiple chunks
     """
     from docling_core.transforms.chunker import HybridChunker
 
@@ -335,6 +440,7 @@ def _chunk_document(
         tokenizer=tokenizer,
         max_tokens=max_tokens,
         merge_peers=merge_peers,
+        repeat_table_header=True,  # Repeat header row in split tables for RAG quality
     )
 
     chunks = []
@@ -343,7 +449,6 @@ def _chunk_document(
 
         section_header = None
         page_number = None
-        token_count = None
         labels = []
 
         meta = getattr(chunk, "meta", None)
@@ -366,27 +471,12 @@ def _chunk_document(
                                 page_number = page_no
 
                     # Collect element labels
-                    if include_labels:
-                        label = getattr(item, "label", None)
-                        if label is not None:
-                            label_str = str(label)
-                            if hasattr(label, "value"):
-                                label_str = str(label.value)
-                            elif hasattr(label, "name"):
-                                label_str = label.name
-                            if label_str and label_str not in labels:
-                                labels.append(label_str)
+                    label_str = _get_label_str(item)
+                    if label_str and label_str not in labels:
+                        labels.append(label_str)
 
         chunk_text = getattr(chunk, "text", "") or str(chunk)
-
-        # Estimate token count from the tokenizer
-        try:
-            from docling_core.transforms.chunker.tokenizer import HuggingFaceTokenizer
-            tok = HuggingFaceTokenizer(tokenizer)
-            token_count = tok.count_tokens(chunk_text)
-        except Exception:
-            # Rough estimate: ~4 chars per token
-            token_count = len(chunk_text) // 4
+        token_count = _count_tokens(chunk_text, tokenizer)
 
         chunks.append(ChunkResponse(
             text=chunk_text,
@@ -422,6 +512,11 @@ async def pipeline_info():
         table_mode=TABLE_MODE,
         code_enrichment=CODE_ENRICHMENT,
         accelerator_device=ACCELERATOR_DEVICE,
+        flash_attention=FLASH_ATTENTION,
+        ocr_batch_size=OCR_BATCH_SIZE,
+        layout_batch_size=LAYOUT_BATCH_SIZE,
+        table_batch_size=TABLE_BATCH_SIZE,
+        document_timeout=DOCUMENT_TIMEOUT if DOCUMENT_TIMEOUT > 0 else None,
         supported_formats=[
             "pdf", "docx", "pptx", "xlsx", "html", "xml",
             "csv", "md", "asciidoc", "image",
@@ -441,12 +536,20 @@ async def convert(
 
     Accepts: PDF, DOCX, XLSX, PPTX, HTML, XML, CSV, MD, AsciiDoc, images.
 
+    The pipeline:
+    1. **Layout analysis** detects headings, tables, figures, lists, code blocks
+    2. **Table structure** (TableFormer) recognizes rows, columns, cell spans
+    3. **OCR** extracts text from scanned pages and images
+    4. **Code enrichment** detects code blocks and programming languages
+    5. **HybridChunker** splits into token-aware chunks with heading context
+    6. **Table header repetition** ensures split tables retain column headers
+
     Returns:
     - **text**: Full document as Markdown
     - **sections**: Structural sections with headers, labels, and page numbers
     - **chunks**: Token-aware chunks ready for embedding (with contextualized text)
     - **stats**: Document statistics (tables, figures, headings, etc.)
-    - **metadata**: Parser metadata
+    - **metadata**: Parser metadata including timings
     """
     if not tokenizer:
         tokenizer = DEFAULT_TOKENIZER or "bert-base-uncased"
@@ -489,6 +592,8 @@ async def convert(
             "total_time_s": round(parse_time + chunk_time, 2),
             "tokenizer": tokenizer,
             "max_tokens": max_tokens,
+            "ocr_backend": OCR_BACKEND,
+            "table_mode": TABLE_MODE,
         }
 
         logger.info(
