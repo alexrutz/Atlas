@@ -310,7 +310,10 @@ def _analyze_document(doc) -> tuple[list[SectionResponse], DocumentStats]:
             if hasattr(item, "text"):
                 text = item.text or ""
             elif hasattr(item, "export_to_markdown"):
-                text = item.export_to_markdown()
+                try:
+                    text = item.export_to_markdown(doc)
+                except TypeError:
+                    text = item.export_to_markdown()
 
             if not text.strip():
                 continue
