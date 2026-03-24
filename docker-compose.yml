@@ -35,6 +35,9 @@ services:
   # Downloads the model directly from Hugging Face on first start.
   # --jinja enables Jinja2 chat templates so thinking can be controlled
   # at runtime via the model's built-in template (enable_thinking parameter).
+  # LLM_N_GPU_LAYERS defaults to 50 to leave ~3 GB VRAM free for the
+  # embedding service. Set LLM_N_GPU_LAYERS=-1 in .env to use all layers
+  # (only safe if the embedding service is not running on the same GPU).
   # ---------------------------------------------------------------------------
   llama-llm:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -53,7 +56,7 @@ services:
       --hf-file Qwen3.5-35B-A3B-UD-IQ3_S.gguf
       --port 8080
       --host 0.0.0.0
-      --n-gpu-layers ${LLM_N_GPU_LAYERS:--1}
+      --n-gpu-layers ${LLM_N_GPU_LAYERS:-50}
       --ctx-size ${LLM_CTX_SIZE:-65536}
       --alias llm
       --jinja
