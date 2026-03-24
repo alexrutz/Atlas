@@ -78,10 +78,10 @@ llm:
 
 # -----------------------------------------------------------------------------
 # Embedding Configuration (Text Embeddings Inference, CPU)
-# Model: perplexity-ai/pplx-embed-context-v1-0.6b (2560-dim)
+# Model: perplexity-ai/pplx-embed-context-v1-0.6b (1024-dim)
 # -----------------------------------------------------------------------------
 embedding:
-  base_url: "http://llama-embed:8081"
+  base_url: "http://text-emb-inf:8081"
   model: "perplexity-ai/pplx-embed-context-v1-0.6b"
   batch_size: 32
   max_retries: 3

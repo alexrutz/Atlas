@@ -75,13 +75,13 @@ services:
 
   # ---------------------------------------------------------------------------
   # Text Embeddings Inference - Embedding Server (CPU)
-  # Serves perplexity-ai/pplx-embed-context-v1-4b (2560-dim embeddings).
+  # Serves perplexity-ai/pplx-embed-context-v1-0.6b (1024-dim embeddings).
   # OpenAI-compatible /v1/embeddings endpoint on port 8081.
   # Model is downloaded automatically on first start; cached in embed_model_cache.
   # ---------------------------------------------------------------------------
-  llama-embed:
+  text-emb-inf:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
-    container_name: atlas-llama-embed
+    container_name: atlas-text-emb-inf
     restart: unless-stopped
     ports:
       - "8081:8081"
@@ -164,7 +164,7 @@ services:
         condition: service_healthy
       llama-llm:
         condition: service_healthy
-      llama-embed:
+      text-emb-inf:
         condition: service_healthy
       docling-api:
         condition: service_healthy
