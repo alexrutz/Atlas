@@ -159,7 +159,7 @@ class RetrievalService:
         query = text(f"""
             SELECT c.id, c.document_id, c.content, c.section_header, c.page_number,
                    d.original_name as document_name, col.name as collection_name,
-                   1 - (ce.embedding <=> '{embedding_str}'::halfvec) as similarity
+                   1 - (ce.embedding <=> '{embedding_str}'::vector) as similarity
             FROM rag.chunk_embeddings ce
             JOIN rag.chunks c ON ce.chunk_id = c.id
             JOIN content.documents d ON c.document_id = d.id
@@ -167,7 +167,7 @@ class RetrievalService:
             WHERE d.collection_id = ANY(:collection_ids)
               AND d.processing_status = 'completed'
               AND ce.model_name = :model_name
-            ORDER BY ce.embedding <=> '{embedding_str}'::halfvec
+            ORDER BY ce.embedding <=> '{embedding_str}'::vector
             LIMIT :top_k
         """)
 

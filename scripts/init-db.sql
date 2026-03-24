@@ -121,20 +121,18 @@ CREATE INDEX idx_chunks_content_trgm ON rag.chunks
     USING gin (content gin_trgm_ops);
 
 -- Embeddings stored separately (allows re-embedding, multi-model support)
--- halfvec (16-bit floats) required because 2560 dims exceeds the 2000-dim limit
--- for HNSW on the standard vector type; halfvec supports HNSW up to 4000 dims.
 CREATE TABLE rag.chunk_embeddings (
     id          SERIAL PRIMARY KEY,
     chunk_id    INTEGER NOT NULL REFERENCES rag.chunks(id) ON DELETE CASCADE,
     model_name  VARCHAR(200) NOT NULL,
-    embedding   halfvec(2560),
+    embedding   vector(1024),
     created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(chunk_id, model_name)
 );
 
--- Vector index for similarity search (HNSW on halfvec)
+-- Vector index for similarity search (HNSW)
 CREATE INDEX idx_chunk_embeddings_vector ON rag.chunk_embeddings
-    USING hnsw (embedding halfvec_cosine_ops)
+    USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
 
 CREATE INDEX idx_chunk_embeddings_chunk ON rag.chunk_embeddings(chunk_id);
