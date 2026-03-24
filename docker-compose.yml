@@ -52,8 +52,6 @@ services:
       --port 8080
       --max-model-len ${LLM_MAX_MODEL_LEN:-65536}
       --gpu-memory-utilization ${LLM_GPU_UTIL:-0.55}
-      --enable-reasoning
-      --reasoning-parser deepseek_r1
       --trust-remote-code
       --dtype auto
     deploy:
@@ -90,7 +88,6 @@ services:
     command: >
       --model ${EMBED_MODEL:-pplx-ai/pplx-embed-context-4b}
       --port 8081
-      --task embed
       --gpu-memory-utilization ${EMBED_GPU_UTIL:-0.20}
       --max-model-len ${EMBED_MAX_MODEL_LEN:-32768}
       --trust-remote-code

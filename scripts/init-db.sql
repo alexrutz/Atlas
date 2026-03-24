@@ -130,10 +130,10 @@ CREATE TABLE rag.chunk_embeddings (
     UNIQUE(chunk_id, model_name)
 );
 
--- Vector index for similarity search (IVFFlat)
+-- Vector index for similarity search (HNSW - supports >2000 dimensions)
 CREATE INDEX idx_chunk_embeddings_vector ON rag.chunk_embeddings
-    USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100);
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
 
 CREATE INDEX idx_chunk_embeddings_chunk ON rag.chunk_embeddings(chunk_id);
 CREATE INDEX idx_chunk_embeddings_model ON rag.chunk_embeddings(model_name);
