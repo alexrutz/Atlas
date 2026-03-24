@@ -94,6 +94,7 @@ services:
       --port 8081
       --host 0.0.0.0
       --n-gpu-layers 0
+      --ctx-size ${EMBED_CTX_SIZE:-512}
       --batch-size 32
       --alias embed
       --embedding
