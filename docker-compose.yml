@@ -35,9 +35,6 @@ services:
   # Downloads the model directly from Hugging Face on first start.
   # --jinja enables Jinja2 chat templates so thinking can be controlled
   # at runtime via the model's built-in template (enable_thinking parameter).
-  # LLM_N_GPU_LAYERS defaults to 50 to leave ~3 GB VRAM free for the
-  # embedding service. Set LLM_N_GPU_LAYERS=-1 in .env to use all layers
-  # (only safe if the embedding service is not running on the same GPU).
   # ---------------------------------------------------------------------------
   llama-llm:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -56,7 +53,7 @@ services:
       --hf-file Qwen3.5-35B-A3B-UD-IQ3_S.gguf
       --port 8080
       --host 0.0.0.0
-      --n-gpu-layers ${LLM_N_GPU_LAYERS:-50}
+      --n-gpu-layers ${LLM_N_GPU_LAYERS:--1}
       --ctx-size ${LLM_CTX_SIZE:-65536}
       --alias llm
       --jinja
@@ -81,6 +78,9 @@ services:
   # Serves perplexity-ai/pplx-embed-context-v1-0.6b (1024-dim embeddings).
   # OpenAI-compatible /v1/embeddings endpoint on port 8081.
   # Model is downloaded automatically on first start; cached in embed_model_cache.
+  # Uses the GPU image for its candle backend (which supports the pplx model
+  # architecture), but runs on CPU via CUDA_VISIBLE_DEVICES="" to avoid
+  # competing with the LLM for VRAM.
   # ---------------------------------------------------------------------------
   text-emb-inf:
     image: ghcr.io/huggingface/text-embeddings-inference:89-1.9
@@ -90,16 +90,10 @@ services:
       - "8081:8081"
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
+      - CUDA_VISIBLE_DEVICES=
     volumes:
       - embed_model_cache:/data
     command: --model-id perplexity-ai/pplx-embed-context-v1-0.6b --port 8081 --hostname 0.0.0.0 --dtype float32
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
