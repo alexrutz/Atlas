@@ -32,7 +32,7 @@ database:
 # pgvector Configuration
 # -----------------------------------------------------------------------------
 vector:
-  dimensions: 1024
+  dimensions: 2560
   index_type: "hnsw"
   distance_metric: "cosine"
   ivfflat_lists: 100
@@ -78,11 +78,11 @@ llm:
 
 # -----------------------------------------------------------------------------
 # Embedding Configuration (Text Embeddings Inference, CPU)
-# Model: BAAI/bge-m3 (1024-dim, multilingual, ~568M params, CPU-efficient)
+# Model: perplexity-ai/pplx-embed-context-v1-0.6b (2560-dim)
 # -----------------------------------------------------------------------------
 embedding:
   base_url: "http://llama-embed:8081"
-  model: "BAAI/bge-m3"
+  model: "perplexity-ai/pplx-embed-context-v1-0.6b"
   batch_size: 32
   max_retries: 3
   timeout: 60

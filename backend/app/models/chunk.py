@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import String, Integer, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HalfVector
 
 from app.core.database import Base
 from app.core.config import settings
@@ -43,7 +43,7 @@ class ChunkEmbedding(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     chunk_id: Mapped[int] = mapped_column(Integer, ForeignKey("rag.chunks.id", ondelete="CASCADE"), nullable=False)
     model_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    embedding = mapped_column(Vector(settings.vector.dimensions), nullable=True)
+    embedding = mapped_column(HalfVector(settings.vector.dimensions), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
