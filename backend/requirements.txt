@@ -20,27 +20,16 @@ bcrypt==4.2.1
 pyyaml==6.0.2
 pydantic==2.10.4
 
-# Document processing - Docling (primary pipeline)
-docling>=2.31.0
-docling-core[chunking]>=2.31.0
+# HTTP Client (for Docling API and vLLM calls)
+httpx==0.28.1
 
-# Document processing - Legacy (fallback)
+# PDF page rendering (for page-view endpoint)
 pypdf==5.1.0
-python-docx==1.1.2
-openpyxl==3.1.5
-python-pptx==1.0.2
-beautifulsoup4==4.12.3
-
-# OCR (Tesseract fallback)
-pytesseract==0.3.13
 pdf2image==1.17.0
 Pillow==11.1.0
 
 # Cross-encoder reranking (ONNX, no PyTorch needed)
 flashrank
-
-# HTTP Client
-httpx==0.28.1
 
 # Docker
 docker==7.1.0

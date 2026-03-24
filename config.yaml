@@ -88,50 +88,19 @@ embedding:
   timeout: 60
 
 # -----------------------------------------------------------------------------
-# VLM-OCR (Vision-Language Model for layout-aware OCR, GPU-accelerated)
-# Model: Qianfan-OCR (Layout-as-thought reasoning for structured text extraction)
-# Layout-as-thought: the model first analyzes page structure (headers, tables,
-# columns, lists) then extracts text in logical reading order.
-# -----------------------------------------------------------------------------
-vlm_ocr:
-  enabled: true
-  base_url: "http://vllm-ocr:8082"
-  model: "stepfun-ai/Qianfan-OCR"
-  timeout: 120  # GPU inference is much faster than CPU
-  max_tokens: 16384
-  max_image_size_px: 2048
-  dpi: 300
-  layout_as_thought: true
-  system_prompt: |
-    You are a precise document OCR engine with Layout-as-thought reasoning.
-    First, analyze the spatial layout of the page: identify columns, headers,
-    footers, tables, lists, captions, and reading order.
-    Then, extract ALL text faithfully in logical reading order.
-    Preserve paragraph breaks and structural hierarchy.
-    For tables, render them in markdown table format.
-    Output ONLY the extracted document text — no commentary.
-
-# -----------------------------------------------------------------------------
-# Docling Pipeline (advanced document parsing & chunking)
-# When enabled, replaces legacy parsers with Docling's ML-powered pipeline:
-# - Layout analysis model (Heron) for page element detection
-# - TableFormer for table structure recognition
-# - HybridChunker for token-aware, structure-preserving chunking
-# Set enabled: false to fall back to legacy pypdf/python-docx parsers.
+# Docling API (document parsing & chunking via dedicated container)
+# Handles: PDF, DOCX, XLSX, PPTX, HTML, XML
+# ML-powered layout analysis, table structure recognition, HybridChunker
 # -----------------------------------------------------------------------------
 docling:
-  enabled: true
-  do_ocr: true
-  do_table_structure: true
-  table_mode: "fast"             # "fast" (default) or "accurate" (slower, better quality)
-  use_docling_chunker: true      # Use HybridChunker (false = legacy chunking strategies)
-  max_tokens: 512                # Token limit per chunk (aligned to embedding model)
+  base_url: "http://docling-api:8090"
+  max_tokens: 512                # Token limit per chunk for HybridChunker
   merge_peers: true              # Merge undersized adjacent chunks with same headings
   tokenizer: ""                  # HuggingFace tokenizer (empty = use embedding model name)
-  accelerator_device: "auto"     # "auto", "cuda", "mps", "cpu"
 
 # -----------------------------------------------------------------------------
-# Document Processing (Legacy Chunking - used when docling.use_docling_chunker is false)
+# Document Processing (local chunking for text-based formats)
+# Used for TXT, MD, CSV, JSON files that don't need ML parsing.
 # -----------------------------------------------------------------------------
 chunking:
   strategy: "semantic"
@@ -175,10 +144,6 @@ documents:
     - ".xml"
     - ".json"
   max_file_size_mb: 100
-  ocr_enabled: true
-  ocr_language: "deu+eng"
-  ocr_backend: "vlm"
-  vlm_always: true
   temp_upload_dir: "/tmp/atlas_uploads"
 
 # -----------------------------------------------------------------------------

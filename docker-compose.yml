@@ -112,36 +112,26 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # vLLM - VLM OCR Server (GPU-accelerated)
-  # Model: Qianfan-OCR (Vision-Language Model for layout-aware OCR)
-  # Configure via .env: VLM_MODEL, VLM_GPU_UTIL
+  # Docling API (document parsing & chunking)
+  # ML-powered layout analysis, table structure recognition, HybridChunker.
+  # Configure via .env: DOCLING_* variables
   # ---------------------------------------------------------------------------
-  vllm-ocr:
-    image: vllm/vllm-openai:latest
-    container_name: atlas-vllm-ocr
+  docling-api:
+    build:
+      context: ./docling-api
+      dockerfile: Dockerfile
+    container_name: atlas-docling-api
     restart: unless-stopped
     ports:
-      - "8082:8082"
-    volumes:
-      - ../models:/models
+      - "8090:8090"
     environment:
-      - HF_HOME=/models/huggingface
-    command: >
-      --model ${VLM_MODEL:-stepfun-ai/Qianfan-OCR}
-      --port 8082
-      --gpu-memory-utilization ${VLM_GPU_UTIL:-0.20}
-      --max-model-len ${VLM_MAX_MODEL_LEN:-32768}
-      --trust-remote-code
-      --dtype auto
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - DOCLING_DO_OCR=${DOCLING_DO_OCR:-true}
+      - DOCLING_DO_TABLE_STRUCTURE=${DOCLING_DO_TABLE_STRUCTURE:-true}
+      - DOCLING_TABLE_MODE=${DOCLING_TABLE_MODE:-fast}
+      - DOCLING_ACCELERATOR_DEVICE=${DOCLING_ACCELERATOR_DEVICE:-auto}
+      - DOCLING_DEFAULT_TOKENIZER=${DOCLING_DEFAULT_TOKENIZER:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
       interval: 30s
       timeout: 10s
       retries: 10
@@ -176,7 +166,7 @@ services:
         condition: service_healthy
       vllm-embed:
         condition: service_healthy
-      vllm-ocr:
+      docling-api:
         condition: service_healthy
     networks:
       - atlas-network

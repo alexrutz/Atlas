@@ -1,6 +1,6 @@
 # Atlas - Local RAG System for Enterprise Documents
 
-Atlas is a fully **on-premises** Retrieval-Augmented Generation (RAG) system for enterprise internal documents. Employees can ask natural-language questions about company documents and receive context-enriched answers powered by locally-running LLMs via llama.cpp - no data leaves the corporate network.
+Atlas is a fully **on-premises** Retrieval-Augmented Generation (RAG) system for enterprise internal documents. Employees can ask natural-language questions about company documents and receive context-enriched answers powered by locally-running LLMs via vLLM with GPU acceleration - no data leaves the corporate network.
 
 ---
 
@@ -8,7 +8,8 @@ Atlas is a fully **on-premises** Retrieval-Augmented Generation (RAG) system for
 
 | Feature | Description |
 |---|---|
-| **100% Local** | All LLM inference and embeddings run via llama.cpp with CUDA - no cloud calls |
+| **100% Local** | All LLM and embedding inference runs via vLLM with CUDA GPU acceleration - no cloud calls |
+| **Docling API** | Dedicated ML-powered document parsing container with layout analysis, table structure recognition, and HybridChunker |
 | **Query Enrichment** | Automatically expands queries with collection/global context before retrieval (toggleable) |
 | **Dual Thinking Modes** | Separate thinking toggles for RAG answers and query enrichment, each with optimized sampling |
 | **Hybrid Search** | Combines pgvector cosine similarity with PostgreSQL full-text search |
@@ -17,7 +18,7 @@ Atlas is a fully **on-premises** Retrieval-Augmented Generation (RAG) system for
 | **Editable Prompts** | RAG, enrichment, and free chat system prompts editable live from the admin panel |
 | **Permission System** | Users → Groups → Collections multi-level access control |
 | **Docker Management** | Admin panel for managing Atlas containers, images, and volumes |
-| **Multi-format OCR** | PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, HTML, XML, JSON - with Qianfan-OCR Layout-as-thought VLM for scanned PDFs (tesseract fallback) |
+| **Multi-format Parsing** | PDF, DOCX, XLSX, PPTX, HTML, XML (via Docling), TXT, MD, CSV, JSON (local) |
 | **Conversation History** | Every conversation is persisted and resumable |
 | **LLM Diagnostics** | Color-coded diagnostic log container shows all LLM inputs/outputs in real time |
 | **Containerized** | One-command startup with Docker Compose |
@@ -36,8 +37,9 @@ Nginx Reverse Proxy
 FastAPI Backend (port 8000)
     │
     ├── PostgreSQL 16 + pgvector (port 5432)
-    ├── llama.cpp LLM Server (port 8080) — Qwen3.5-35B-A3B, 65K context
-    ├── llama.cpp Embedding Server (port 8081) — Qianfan-OCR 4B, Layout-as-thought VLM
+    ├── vLLM LLM Server (port 8080) — Qwen3.5-35B-A3B, 65K context, GPU
+    ├── vLLM Embedding Server (port 8081) — pplx-embed-context-4b, GPU
+    ├── Docling API (port 8090) — ML document parsing & chunking
     └── Docker Socket (container management)
 
 LLM Diagnostic Sidecar (tails colored log output)
@@ -52,12 +54,7 @@ LLM Diagnostic Sidecar (tails colored log output)
 git clone <repository-url> Atlas
 cd Atlas
 
-# 2. Place models in ../models/ (one level above the repo)
-#    - Qwen3.5-35B-A3B-UD-IQ3_S.gguf       (LLM)
-#    - Qianfan-OCR-Q8_0.gguf                  (Embedding + VLM OCR)
-#    - mmproj-Qianfan-OCR-Q8_0.gguf           (Vision projector for Qianfan-OCR)
-
-# 3. Start all services (first run builds frontend + backend images)
+# 2. Start all services (first run downloads models from HuggingFace and builds images)
 docker compose up -d --build
 ```
 
@@ -74,9 +71,11 @@ openssl rand -hex 32
 
 | Variable | Default | Description |
 |---|---|---|
-| `DB_PASSWORD` | `atlas_default_password` | PostgreSQL password |
+| `DB_PASSWORD` | `atlas` | PostgreSQL password |
 | `AUTH_SECRET_KEY` | `change_me_in_production...` | JWT secret key |
 | `ADMIN_DEFAULT_PASSWORD` | `admin` | Initial admin password |
+| `LLM_MODEL` | `Qwen/Qwen3.5-35B-A3B` | HuggingFace model ID for chat/reasoning |
+| `EMBED_MODEL` | `pplx-ai/pplx-embed-context-4b` | HuggingFace model ID for embeddings |
 
 ---
 
@@ -84,9 +83,10 @@ openssl rand -hex 32
 
 | Service | Container | Port | Description |
 |---|---|---|---|
-| PostgreSQL + pgvector | `atlas-postgres` | 5432 | Vector database with 1024-dim embeddings |
-| llama.cpp LLM | `atlas-llama-cpp` | 8080 | Chat completion API (65K context, CUDA) |
-| llama.cpp Embedding | `atlas-llama-cpp-embed` | 8081 | Embedding + VLM OCR API (Qianfan-OCR, Layout-as-thought, CUDA) |
+| PostgreSQL + pgvector | `atlas-postgres` | 5432 | Vector database with 4096-dim embeddings |
+| vLLM LLM | `atlas-vllm-llm` | 8080 | Chat completion API (65K context, GPU) |
+| vLLM Embedding | `atlas-vllm-embed` | 8081 | Embedding API (GPU) |
+| Docling API | `atlas-docling-api` | 8090 | ML document parsing & chunking |
 | FastAPI Backend | `atlas-backend` | 8000 | API server |
 | React Frontend + Nginx | `atlas-frontend` | 3000 | Web UI |
 | LLM Diagnostic | `atlas-llm-diagnostic` | — | Tails colored diagnostic logs |
@@ -95,7 +95,7 @@ openssl rand -hex 32
 
 ```
 ../postgres_data/  → PostgreSQL persistent data
-../models/         → GGUF model files (shared with llama.cpp containers)
+../models/         → HuggingFace model cache (shared with vLLM containers)
 ./logs/            → Application and LLM diagnostic logs
 ```
 
@@ -121,6 +121,13 @@ Two parameter sets are used depending on whether thinking mode is enabled:
 ---
 
 ## Features Guide
+
+### Document Processing
+
+Documents are processed through two pipelines depending on format:
+
+- **Docling API** (PDF, DOCX, XLSX, PPTX, HTML, XML): ML-powered layout analysis with table structure recognition and token-aware HybridChunker
+- **Local** (TXT, MD, CSV, JSON): Simple text extraction with configurable chunking strategies
 
 ### RAG Pipeline
 
@@ -189,7 +196,7 @@ User → belongs to → Group(s) → has access to → Collection(s) → contain
 ## Development
 
 ```bash
-# Backend (requires Python 3.11+)
+# Backend (requires Python 3.12+)
 cd backend && pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 

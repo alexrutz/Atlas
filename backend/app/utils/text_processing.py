@@ -1,146 +1,20 @@
 """
 Text processing: chunking strategies.
 
-Primary: Docling HybridChunker (token-aware, structure-preserving).
-Fallback: Legacy strategies (fixed, sentence, recursive, semantic).
+For documents parsed via the Docling API, chunks are returned directly from
+the API and this module is not needed.
+
+For locally-parsed text files (TXT, MD, CSV, JSON), this module provides
+simple chunking strategies: fixed, sentence, recursive, semantic.
 """
 
+import re
 import logging
-from dataclasses import dataclass
 
-from app.utils.file_parsers import ParsedSection
+from app.utils.file_parsers import ParsedSection, ChunkData
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class ChunkData:
-    """A single chunk with metadata."""
-    text: str
-    section_header: str | None = None
-    page_number: int | None = None
-    # Enriched text with heading/caption context (from docling contextualize)
-    contextualized_text: str | None = None
-
-
-# =============================================================================
-# Unified entry point
-# =============================================================================
-
-def chunk_document(
-    text: str,
-    sections: list[ParsedSection] | None = None,
-    docling_document: object | None = None,
-) -> list[ChunkData]:
-    """
-    Chunk a document using the configured strategy.
-
-    If docling chunking is enabled and a DoclingDocument is available,
-    uses HybridChunker for token-aware, structure-preserving chunks.
-    Otherwise falls back to legacy chunking strategies.
-
-    Args:
-        text: Full document text
-        sections: Parsed sections (for legacy semantic chunking)
-        docling_document: Raw DoclingDocument from docling parsing
-
-    Returns:
-        List of ChunkData with text and metadata
-    """
-    from app.core.config import settings
-
-    if (
-        settings.docling.enabled
-        and settings.docling.use_docling_chunker
-        and docling_document is not None
-    ):
-        try:
-            return _chunk_with_docling(docling_document)
-        except Exception as e:
-            logger.warning(f"Docling chunking failed, falling back to legacy: {e}")
-
-    return chunk_text(
-        text=text,
-        strategy=settings.chunking.strategy,
-        chunk_size=settings.chunking.chunk_size,
-        overlap=settings.chunking.chunk_overlap,
-        sections=sections,
-    )
-
-
-# =============================================================================
-# Docling HybridChunker
-# =============================================================================
-
-def _chunk_with_docling(docling_document) -> list[ChunkData]:
-    """Chunk a DoclingDocument using Docling's HybridChunker.
-
-    HybridChunker combines:
-    1. Hierarchical chunking (one chunk per document element)
-    2. Token-aware splitting (oversized chunks split by token count)
-    3. Peer merging (undersized adjacent chunks with same headings merged)
-
-    Each chunk carries structural context (headings, captions) as metadata.
-    """
-    from docling_core.transforms.chunker import HybridChunker
-    from app.core.config import settings
-
-    cfg = settings.docling
-
-    # Determine tokenizer: use configured one, or fall back to embedding model
-    tokenizer_name = cfg.tokenizer or settings.embedding.model
-
-    chunker = HybridChunker(
-        tokenizer=tokenizer_name,
-        max_tokens=cfg.max_tokens,
-        merge_peers=cfg.merge_peers,
-    )
-
-    chunks = []
-    for i, chunk in enumerate(chunker.chunk(docling_document)):
-        # contextualize() produces metadata-enriched text
-        # (includes parent headings and captions as prefix)
-        contextualized = chunker.contextualize(chunk)
-
-        # Extract metadata from chunk
-        section_header = None
-        page_number = None
-
-        # Get heading context from chunk metadata
-        meta = getattr(chunk, "meta", None)
-        if meta:
-            headings = getattr(meta, "headings", None)
-            if headings:
-                section_header = " > ".join(headings)
-
-            # Get page number from provenance
-            doc_items = getattr(meta, "doc_items", None)
-            if doc_items:
-                for item in doc_items:
-                    prov = getattr(item, "prov", None)
-                    if prov and len(prov) > 0:
-                        page_no = getattr(prov[0], "page_no", None)
-                        if page_no:
-                            page_number = page_no
-                            break
-
-        # Use the raw chunk text as primary, contextualized for embedding
-        chunk_text_raw = getattr(chunk, "text", "") or str(chunk)
-
-        chunks.append(ChunkData(
-            text=chunk_text_raw,
-            section_header=section_header,
-            page_number=page_number,
-            contextualized_text=contextualized,
-        ))
-
-    logger.info(f"Docling HybridChunker: produced {len(chunks)} chunks")
-    return chunks
-
-
-# =============================================================================
-# Legacy chunking strategies (fallback)
-# =============================================================================
 
 def chunk_text(
     text: str,
@@ -150,7 +24,7 @@ def chunk_text(
     sections: list[ParsedSection] | None = None,
 ) -> list[ChunkData]:
     """
-    Split text into chunks using legacy strategies.
+    Split text into chunks using the specified strategy.
 
     Args:
         text: The text to split
@@ -162,5 +36,136 @@ def chunk_text(
     Returns:
         List of ChunkData
     """
-    from app.utils.text_processing_legacy import chunk_text as legacy_chunk
-    return legacy_chunk(text, strategy, chunk_size, overlap, sections)
+    strategies = {
+        "fixed": _chunk_fixed,
+        "sentence": _chunk_sentence,
+        "recursive": _chunk_recursive,
+        "semantic": _chunk_semantic,
+    }
+
+    func = strategies.get(strategy, _chunk_recursive)
+
+    if strategy == "semantic" and sections:
+        return func(text, chunk_size, overlap, sections=sections)
+
+    return func(text, chunk_size, overlap)
+
+
+def _chunk_fixed(text: str, chunk_size: int, overlap: int, **kwargs) -> list[ChunkData]:
+    """Fixed-size chunking with overlap."""
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunk = text[start:end]
+        if chunk.strip():
+            chunks.append(ChunkData(text=chunk.strip()))
+        start = end - overlap
+    return chunks
+
+
+def _chunk_sentence(text: str, chunk_size: int, overlap: int, **kwargs) -> list[ChunkData]:
+    """Sentence-based chunking."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    chunks = []
+    current_chunk = []
+    current_len = 0
+
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        if current_len + len(sentence) > chunk_size and current_chunk:
+            chunks.append(ChunkData(text=" ".join(current_chunk)))
+            overlap_text = " ".join(current_chunk)
+            while len(overlap_text) > overlap and current_chunk:
+                current_chunk.pop(0)
+                overlap_text = " ".join(current_chunk)
+            current_len = len(overlap_text)
+        current_chunk.append(sentence)
+        current_len += len(sentence)
+
+    if current_chunk:
+        chunks.append(ChunkData(text=" ".join(current_chunk)))
+
+    return chunks
+
+
+def _chunk_recursive(text: str, chunk_size: int, overlap: int, **kwargs) -> list[ChunkData]:
+    """Recursive chunking by separator hierarchy."""
+    separators = ["\n\n", "\n", ". ", " "]
+    return _recursive_split(text, separators, chunk_size, overlap)
+
+
+def _recursive_split(
+    text: str,
+    separators: list[str],
+    chunk_size: int,
+    overlap: int,
+) -> list[ChunkData]:
+    if not text.strip():
+        return []
+
+    if len(text) <= chunk_size:
+        return [ChunkData(text=text.strip())]
+
+    if not separators:
+        return _chunk_fixed(text, chunk_size, overlap)
+
+    sep = separators[0]
+    parts = text.split(sep)
+    chunks = []
+    current = []
+    current_len = 0
+
+    for part in parts:
+        if current_len + len(part) > chunk_size and current:
+            chunk_text = sep.join(current)
+            if chunk_text.strip():
+                if len(chunk_text) > chunk_size * 1.5:
+                    sub_chunks = _recursive_split(chunk_text, separators[1:], chunk_size, overlap)
+                    chunks.extend(sub_chunks)
+                else:
+                    chunks.append(ChunkData(text=chunk_text.strip()))
+            current = []
+            current_len = 0
+
+        current.append(part)
+        current_len += len(part) + len(sep)
+
+    if current:
+        chunk_text = sep.join(current)
+        if chunk_text.strip():
+            chunks.append(ChunkData(text=chunk_text.strip()))
+
+    return chunks
+
+
+def _chunk_semantic(
+    text: str,
+    chunk_size: int,
+    overlap: int,
+    sections: list[ParsedSection] | None = None,
+    **kwargs,
+) -> list[ChunkData]:
+    """Semantic chunking based on document sections."""
+    if not sections:
+        return _chunk_recursive(text, chunk_size, overlap)
+
+    chunks = []
+    for section in sections:
+        if len(section.content) <= chunk_size:
+            chunks.append(ChunkData(
+                text=section.content.strip(),
+                section_header=section.header,
+                page_number=section.page_number,
+            ))
+        else:
+            sub_chunks = _chunk_recursive(section.content, chunk_size, overlap)
+            for sc in sub_chunks:
+                sc.section_header = section.header
+                sc.page_number = section.page_number
+            chunks.extend(sub_chunks)
+
+    return chunks
