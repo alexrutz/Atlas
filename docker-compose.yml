@@ -2,7 +2,6 @@
 # Atlas RAG System - Docker Compose
 # =============================================================================
 # Starts all required services for the Atlas RAG system.
-# All inference services run on vLLM with GPU acceleration.
 # Usage: docker compose up -d
 # =============================================================================
 
@@ -32,8 +31,10 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # llama-server - LLM Server (OpenAI-compatible API, GPU)
-  # Requires a GGUF model file; configure via .env: LLM_MODEL_FILE, etc.
+  # llama-server - LLM Server (OpenAI-compatible API, CUDA GPU)
+  # Downloads the model directly from Hugging Face on first start.
+  # --jinja enables Jinja2 chat templates so thinking can be controlled
+  # at runtime via the model's built-in template (enable_thinking parameter).
   # ---------------------------------------------------------------------------
   llama-llm:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -42,15 +43,20 @@ services:
     user: root
     ports:
       - "8080:8080"
+    environment:
+      - HF_HOME=/models
+      - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - ../models:/models
     command: >
-      --model /models/${LLM_MODEL_FILE}
+      --hf-repo unsloth/Qwen3.5-35B-A3B-GGUF
+      --hf-file Qwen3.5-35B-A3B-UD-IQ3_S.gguf
       --port 8080
       --host 0.0.0.0
       --n-gpu-layers ${LLM_N_GPU_LAYERS:--1}
       --ctx-size ${LLM_CTX_SIZE:-65536}
       --alias llm
+      --jinja
     deploy:
       resources:
         reservations:
@@ -63,13 +69,16 @@ services:
       interval: 30s
       timeout: 10s
       retries: 10
-      start_period: 120s
+      start_period: 180s
     networks:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # llama-server - Embedding Server (GPU-accelerated)
-  # Requires a GGUF model file; configure via .env: EMBED_MODEL_FILE, etc.
+  # llama-embed - Embedding Server (OpenAI-compatible API, CPU)
+  # Serves mixedbread-ai/mxbai-embed-large-v1 (1024-dim embeddings).
+  # OpenAI-compatible /v1/embeddings endpoint on port 8081.
+  # Model is downloaded from Hugging Face on first start; cached in embed_model_cache.
+  # Runs on CPU (--n-gpu-layers 0) so the LLM keeps full VRAM.
   # ---------------------------------------------------------------------------
   llama-embed:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -81,26 +90,20 @@ services:
     volumes:
       - ../models:/models
     command: >
-      --model /models/${EMBED_MODEL_FILE}
+      -m /models/pplx-embed-context-v1-0.6b-q8_0.gguf
       --port 8081
       --host 0.0.0.0
-      --n-gpu-layers ${EMBED_N_GPU_LAYERS:--1}
-      --ctx-size ${EMBED_CTX_SIZE:-8192}
-      --embeddings
+      --n-gpu-layers 0
+      --ctx-size ${EMBED_CTX_SIZE:-512}
+      --batch-size 32
       --alias embed
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      --embedding
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
       timeout: 10s
       retries: 10
-      start_period: 120s
+      start_period: 300s
     networks:
       - atlas-network
 
@@ -125,7 +128,7 @@ services:
       - DOCLING_DO_TABLE_STRUCTURE=${DOCLING_DO_TABLE_STRUCTURE:-true}
       - DOCLING_TABLE_MODE=${DOCLING_TABLE_MODE:-fast}
       - DOCLING_DO_CODE_ENRICHMENT=${DOCLING_DO_CODE_ENRICHMENT:-true}
-      - DOCLING_ACCELERATOR_DEVICE=${DOCLING_ACCELERATOR_DEVICE:-auto}
+      - DOCLING_ACCELERATOR_DEVICE=cpu
       - DOCLING_FLASH_ATTENTION=${DOCLING_FLASH_ATTENTION:-false}
       - DOCLING_OCR_BATCH_SIZE=${DOCLING_OCR_BATCH_SIZE:-4}
       - DOCLING_LAYOUT_BATCH_SIZE=${DOCLING_LAYOUT_BATCH_SIZE:-4}

@@ -77,8 +77,8 @@ llm:
     Answer in the same language the user asks in.
 
 # -----------------------------------------------------------------------------
-# Embedding Configuration (llama-server, GPU-accelerated)
-# Model: GGUF file configured via EMBED_MODEL_FILE in .env
+# Embedding Configuration (llama-server, CPU)
+# Model: perplexity-ai/pplx-embed-context-v1-0.6b (1024-dim)
 # -----------------------------------------------------------------------------
 embedding:
   base_url: "http://llama-embed:8081"

@@ -130,7 +130,7 @@ CREATE TABLE rag.chunk_embeddings (
     UNIQUE(chunk_id, model_name)
 );
 
--- Vector index for similarity search (HNSW - supports >2000 dimensions)
+-- Vector index for similarity search (HNSW)
 CREATE INDEX idx_chunk_embeddings_vector ON rag.chunk_embeddings
     USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
