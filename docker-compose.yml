@@ -36,7 +36,7 @@ services:
   # Requires a GGUF model file; configure via .env: LLM_MODEL_FILE, etc.
   # ---------------------------------------------------------------------------
   llama-llm:
-    image: ghcr.io/ggerganov/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: atlas-llama-llm
     restart: unless-stopped
     ports:
@@ -71,7 +71,7 @@ services:
   # Requires a GGUF model file; configure via .env: EMBED_MODEL_FILE, etc.
   # ---------------------------------------------------------------------------
   llama-embed:
-    image: ghcr.io/ggerganov/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: atlas-llama-embed
     restart: unless-stopped
     ports:
