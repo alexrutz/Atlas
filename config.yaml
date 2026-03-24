@@ -77,12 +77,12 @@ llm:
     Answer in the same language the user asks in.
 
 # -----------------------------------------------------------------------------
-# Embedding Configuration (Text Embeddings Inference, CPU)
-# Model: perplexity-ai/pplx-embed-context-v1-0.6b (1024-dim)
+# Embedding Configuration (llama-server, CPU)
+# Model: mixedbread-ai/mxbai-embed-large-v1 (1024-dim)
 # -----------------------------------------------------------------------------
 embedding:
-  base_url: "http://text-emb-inf:8081"
-  model: "perplexity-ai/pplx-embed-context-v1-0.6b"
+  base_url: "http://llama-embed:8081"
+  model: "embed"
   batch_size: 32
   max_retries: 3
   timeout: 60

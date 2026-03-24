@@ -74,26 +74,33 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # Text Embeddings Inference - Embedding Server (CPU)
-  # Serves perplexity-ai/pplx-embed-context-v1-0.6b (1024-dim embeddings).
+  # llama-embed - Embedding Server (OpenAI-compatible API, CPU)
+  # Serves mixedbread-ai/mxbai-embed-large-v1 (1024-dim embeddings).
   # OpenAI-compatible /v1/embeddings endpoint on port 8081.
-  # Model is downloaded automatically on first start; cached in embed_model_cache.
-  # Uses the GPU image for its candle backend (which supports the pplx model
-  # architecture), but runs on CPU via CUDA_VISIBLE_DEVICES="" to avoid
-  # competing with the LLM for VRAM.
+  # Model is downloaded from Hugging Face on first start; cached in embed_model_cache.
+  # Runs on CPU (--n-gpu-layers 0) so the LLM keeps full VRAM.
   # ---------------------------------------------------------------------------
-  text-emb-inf:
-    image: ghcr.io/huggingface/text-embeddings-inference:89-1.9
-    container_name: atlas-text-emb-inf
+  llama-embed:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: atlas-llama-embed
     restart: unless-stopped
+    user: root
     ports:
       - "8081:8081"
     environment:
+      - HF_HOME=/models
       - HF_TOKEN=${HF_TOKEN:-}
-      - CUDA_VISIBLE_DEVICES=
     volumes:
-      - embed_model_cache:/data
-    command: --model-id perplexity-ai/pplx-embed-context-v1-0.6b --port 8081 --hostname 0.0.0.0 --dtype float32
+      - embed_model_cache:/models
+    command: >
+      --hf-repo mixedbread-ai/mxbai-embed-large-v1-GGUF
+      --hf-file mxbai-embed-large-v1-q8_0.gguf
+      --port 8081
+      --host 0.0.0.0
+      --n-gpu-layers 0
+      --batch-size 32
+      --alias embed
+      --embedding
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
@@ -168,7 +175,7 @@ services:
         condition: service_healthy
       llama-llm:
         condition: service_healthy
-      text-emb-inf:
+      llama-embed:
         condition: service_healthy
       docling-api:
         condition: service_healthy
