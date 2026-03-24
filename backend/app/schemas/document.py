@@ -14,6 +14,7 @@ class DocumentResponse(BaseModel):
     processing_status: str
     processing_error: str | None
     chunk_count: int
+    metadata_: dict | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -24,3 +25,6 @@ class DocumentStatusResponse(BaseModel):
     processing_status: str
     processing_error: str | None
     chunk_count: int
+    metadata_: dict | None = None
+
+    model_config = {"from_attributes": True}

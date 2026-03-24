@@ -1,5 +1,5 @@
 """
-LLM Service - Communication with vLLM via the OpenAI-compatible API.
+LLM Service - Communication with llama-server via the OpenAI-compatible API.
 
 Supports streaming, thinking mode (reasoning), and different system prompts.
 """
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    """Communication with vLLM via the OpenAI-compatible API."""
+    """Communication with llama-server via the OpenAI-compatible API."""
 
     def __init__(self):
         self.config = settings.llm
@@ -30,21 +30,13 @@ class LLMService:
     def _sampling_params(self, enable_thinking: bool) -> dict:
         """Return sampling parameters based on thinking mode."""
         s = self.config.thinking_sampling if enable_thinking else self.config.sampling
-        params = {
+        return {
             "temperature": s.temperature,
             "top_p": s.top_p,
-            "presence_penalty": s.presence_penalty,
-        }
-        # vLLM supports extra params via extra_body
-        return params
-
-    def _extra_body(self, enable_thinking: bool) -> dict:
-        """Return vLLM-specific extra parameters."""
-        s = self.config.thinking_sampling if enable_thinking else self.config.sampling
-        return {
             "top_k": s.top_k,
             "min_p": s.min_p,
-            "repetition_penalty": s.repetition_penalty,
+            "presence_penalty": s.presence_penalty,
+            "repeat_penalty": s.repetition_penalty,
         }
 
     async def generate(
@@ -71,7 +63,6 @@ class LLMService:
             **self._sampling_params(enable_thinking),
             "max_tokens": self.config.max_tokens,
             "stream": False,
-            "extra_body": self._extra_body(enable_thinking),
         }
         logger.info(f"generate: enable_thinking={enable_thinking}")
 
@@ -131,7 +122,6 @@ class LLMService:
             **self._sampling_params(enable_thinking),
             "max_tokens": self.config.max_tokens,
             "stream": True,
-            "extra_body": self._extra_body(enable_thinking),
         }
         logger.info(f"generate_stream: enable_thinking={enable_thinking}")
 
@@ -185,7 +175,6 @@ class LLMService:
             **sampling,
             "max_tokens": 256,
             "stream": False,
-            "extra_body": self._extra_body(enable_thinking),
         }
 
         try:

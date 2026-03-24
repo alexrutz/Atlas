@@ -1,7 +1,7 @@
 """
-Zentrale Konfiguration - lädt config.yaml und stellt alle Einstellungen bereit.
+Central configuration - loads config.yaml and provides all settings.
 
-Umgebungsvariablen in der YAML-Datei (${VAR_NAME}) werden automatisch aufgelöst.
+Environment variables in the YAML file (${VAR_NAME}) are resolved automatically.
 """
 
 import os
@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 
 # =============================================================================
-# Pydantic Konfigurationsmodelle
+# Pydantic configuration models
 # =============================================================================
 
 class ServerConfig(BaseModel):
@@ -42,7 +42,7 @@ class DatabaseConfig(BaseModel):
 
 
 class VectorConfig(BaseModel):
-    dimensions: int = 4096
+    dimensions: int = 1024
     index_type: str = "ivfflat"
     distance_metric: str = "cosine"
     ivfflat_lists: int = 100
@@ -90,39 +90,11 @@ class EmbeddingConfig(BaseModel):
     timeout: int = 60
 
 
-class VlmOcrConfig(BaseModel):
-    enabled: bool = True
-    base_url: str = "http://vllm-ocr:8082"
-    model: str = "stepfun-ai/Qianfan-OCR"
-    timeout: int = 120  # GPU inference is much faster than CPU
-    max_tokens: int = 16384
-    max_image_size_px: int = 2048
-    dpi: int = 300
-    layout_as_thought: bool = True
-    system_prompt: str = (
-        "You are a precise document OCR engine with Layout-as-thought reasoning.\n"
-        "First, analyze the spatial layout of the page: identify columns, headers,\n"
-        "footers, tables, lists, captions, and reading order.\n"
-        "Then, extract ALL text faithfully in logical reading order.\n"
-        "Preserve paragraph breaks and structural hierarchy.\n"
-        "For tables, render them in markdown table format.\n"
-        "Output ONLY the extracted document text — no commentary."
-    )
-
-
 class DoclingConfig(BaseModel):
-    enabled: bool = True  # Use docling pipeline (false = legacy parsers)
-    # Pipeline options
-    do_ocr: bool = True
-    do_table_structure: bool = True
-    table_mode: str = "fast"  # "fast" or "accurate"
-    # Chunking
-    use_docling_chunker: bool = True  # Use HybridChunker (false = legacy chunking)
-    max_tokens: int = 512  # Token limit per chunk for HybridChunker
-    merge_peers: bool = True  # Merge undersized adjacent chunks with same headings
-    tokenizer: str = ""  # HuggingFace tokenizer name (empty = use embedding model name)
-    # GPU acceleration
-    accelerator_device: str = "auto"  # "auto", "cuda", "mps", "cpu"
+    base_url: str = "http://docling-api:8090"
+    max_tokens: int = 512
+    merge_peers: bool = True
+    tokenizer: str = ""
 
 
 class ChunkingConfig(BaseModel):
@@ -148,17 +120,13 @@ class RetrievalConfig(BaseModel):
     rerank: bool = True
     rerank_model: str = "ms-marco-MiniLM-L-12-v2"
     rerank_top_k: int = 5
-    similarity_threshold: float = 0.3  # Drop chunks below this cosine similarity
+    similarity_threshold: float = 0.3
     query_enrichment: QueryEnrichmentConfig = QueryEnrichmentConfig()
 
 
 class DocumentsConfig(BaseModel):
     supported_formats: list[str] = [".pdf", ".docx", ".txt"]
     max_file_size_mb: int = 100
-    ocr_enabled: bool = True
-    ocr_language: str = "deu+eng"
-    ocr_backend: str = "vlm"  # "vlm" (Qianfan-OCR) or "tesseract" (legacy)
-    vlm_always: bool = True  # Use VLM for ALL PDFs (layout-aware), not just scanned ones
     temp_upload_dir: str = "/tmp/atlas_uploads"
 
 
@@ -187,7 +155,6 @@ class Settings(BaseModel):
     vector: VectorConfig = VectorConfig()
     llm: LLMConfig = LLMConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
-    vlm_ocr: VlmOcrConfig = VlmOcrConfig()
     docling: DoclingConfig = DoclingConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
@@ -197,11 +164,11 @@ class Settings(BaseModel):
 
 
 # =============================================================================
-# YAML laden mit Umgebungsvariablen-Auflösung
+# YAML loading with environment variable resolution
 # =============================================================================
 
 def _resolve_env_vars(value: str) -> str:
-    """Ersetzt ${VAR_NAME} durch den Wert der Umgebungsvariable."""
+    """Replace ${VAR_NAME} with the environment variable value."""
     pattern = re.compile(r'\$\{(\w+)(?::-(.*?))?\}')
 
     def replacer(match):
@@ -213,7 +180,7 @@ def _resolve_env_vars(value: str) -> str:
 
 
 def _resolve_env_recursive(obj):
-    """Rekursive Auflösung von Umgebungsvariablen in verschachtelten Strukturen."""
+    """Recursively resolve environment variables in nested structures."""
     if isinstance(obj, str):
         return _resolve_env_vars(obj)
     elif isinstance(obj, dict):
@@ -224,10 +191,10 @@ def _resolve_env_recursive(obj):
 
 
 def load_settings(config_path: str = "config.yaml") -> Settings:
-    """Lädt die Konfiguration aus der YAML-Datei."""
+    """Load configuration from YAML file."""
     path = Path(config_path)
     if not path.exists():
-        raise FileNotFoundError(f"Konfigurationsdatei nicht gefunden: {config_path}")
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
     with open(path) as f:
         raw = yaml.safe_load(f)
@@ -238,9 +205,9 @@ def load_settings(config_path: str = "config.yaml") -> Settings:
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Cached Settings-Instanz."""
+    """Cached Settings instance."""
     return load_settings()
 
 
-# Globale Settings-Instanz
+# Global Settings instance
 settings = get_settings()
