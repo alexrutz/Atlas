@@ -42,7 +42,7 @@ class DatabaseConfig(BaseModel):
 
 
 class VectorConfig(BaseModel):
-    dimensions: int = 1024
+    dimensions: int = 2560
     index_type: str = "ivfflat"
     distance_metric: str = "cosine"
     ivfflat_lists: int = 100

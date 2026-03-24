@@ -32,7 +32,7 @@ database:
 # pgvector Configuration
 # -----------------------------------------------------------------------------
 vector:
-  dimensions: 1024
+  dimensions: 2560
   index_type: "hnsw"
   distance_metric: "cosine"
   ivfflat_lists: 100
@@ -77,12 +77,12 @@ llm:
     Answer in the same language the user asks in.
 
 # -----------------------------------------------------------------------------
-# Embedding Configuration (llama-server, GPU-accelerated)
-# Model: GGUF file configured via EMBED_MODEL_FILE in .env
+# Embedding Configuration (Text Embeddings Inference, CPU)
+# Model: perplexity-ai/pplx-embed-context-v1-4b (2560-dim)
 # -----------------------------------------------------------------------------
 embedding:
   base_url: "http://llama-embed:8081"
-  model: "embed"
+  model: "perplexity-ai/pplx-embed-context-v1-4b"
   batch_size: 32
   max_retries: 3
   timeout: 60
