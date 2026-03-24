@@ -32,28 +32,24 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # vLLM - LLM Server (OpenAI-compatible API, GPU)
-  # Model: Qwen3.5-35B-A3B (MoE, ~3.5B active parameters)
-  # Configure via .env: LLM_MODEL, LLM_MAX_MODEL_LEN, LLM_GPU_UTIL
+  # llama-server - LLM Server (OpenAI-compatible API, GPU)
+  # Requires a GGUF model file; configure via .env: LLM_MODEL_FILE, etc.
   # ---------------------------------------------------------------------------
-  vllm-llm:
-    image: vllm/vllm-openai:latest
-    container_name: atlas-vllm-llm
+  llama-llm:
+    image: ghcr.io/ggerganov/llama.cpp:server-cuda
+    container_name: atlas-llama-llm
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
       - ../models:/models
-    environment:
-      - HF_HOME=/models/huggingface
-      - VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
     command: >
-      --model ${LLM_MODEL:-Qwen/Qwen3.5-35B-A3B}
+      --model /models/${LLM_MODEL_FILE}
       --port 8080
-      --max-model-len ${LLM_MAX_MODEL_LEN:-65536}
-      --gpu-memory-utilization ${LLM_GPU_UTIL:-0.55}
-      --trust-remote-code
-      --dtype auto
+      --host 0.0.0.0
+      --n-gpu-layers ${LLM_N_GPU_LAYERS:--1}
+      --ctx-size ${LLM_CTX_SIZE:-65536}
+      --alias llm
     deploy:
       resources:
         reservations:
@@ -71,27 +67,25 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # vLLM - Embedding Server (GPU-accelerated)
-  # Model: pplx-embed-context-4b (4B parameters)
-  # Configure via .env: EMBED_MODEL, EMBED_GPU_UTIL
+  # llama-server - Embedding Server (GPU-accelerated)
+  # Requires a GGUF model file; configure via .env: EMBED_MODEL_FILE, etc.
   # ---------------------------------------------------------------------------
-  vllm-embed:
-    image: vllm/vllm-openai:latest
-    container_name: atlas-vllm-embed
+  llama-embed:
+    image: ghcr.io/ggerganov/llama.cpp:server-cuda
+    container_name: atlas-llama-embed
     restart: unless-stopped
     ports:
       - "8081:8081"
     volumes:
       - ../models:/models
-    environment:
-      - HF_HOME=/models/huggingface
     command: >
-      --model ${EMBED_MODEL:-pplx-ai/pplx-embed-context-4b}
+      --model /models/${EMBED_MODEL_FILE}
       --port 8081
-      --gpu-memory-utilization ${EMBED_GPU_UTIL:-0.20}
-      --max-model-len ${EMBED_MAX_MODEL_LEN:-32768}
-      --trust-remote-code
-      --dtype auto
+      --host 0.0.0.0
+      --n-gpu-layers ${EMBED_N_GPU_LAYERS:--1}
+      --ctx-size ${EMBED_CTX_SIZE:-8192}
+      --embeddings
+      --alias embed
     deploy:
       resources:
         reservations:
@@ -171,9 +165,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      vllm-llm:
+      llama-llm:
         condition: service_healthy
-      vllm-embed:
+      llama-embed:
         condition: service_healthy
       docling-api:
         condition: service_healthy
