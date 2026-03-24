@@ -80,7 +80,7 @@ services:
   # Model is downloaded automatically on first start; cached in embed_model_cache.
   # ---------------------------------------------------------------------------
   text-emb-inf:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    image: ghcr.io/huggingface/text-embeddings-inference:89-1.9
     container_name: atlas-text-emb-inf
     restart: unless-stopped
     ports:
@@ -89,7 +89,14 @@ services:
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - embed_model_cache:/data
-    command: --model-id perplexity-ai/pplx-embed-context-v1-0.6b --port 8081 --hostname 0.0.0.0 --pooling cls
+    command: --model-id perplexity-ai/pplx-embed-context-v1-0.6b --port 8081 --hostname 0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
