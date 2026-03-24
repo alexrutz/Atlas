@@ -49,7 +49,8 @@ services:
     volumes:
       - ../models:/models
     command: >
-      --model hf.co/unsloth/Qwen3.5-35B-A3B-GGUF:UD-IQ3_S
+      --hf-repo unsloth/Qwen3.5-35B-A3B-GGUF
+      --hf-file Qwen3.5-35B-A3B-UD-IQ3_S.gguf
       --port 8080
       --host 0.0.0.0
       --n-gpu-layers ${LLM_N_GPU_LAYERS:--1}
