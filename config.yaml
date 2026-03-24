@@ -32,7 +32,7 @@ database:
 # pgvector Configuration
 # -----------------------------------------------------------------------------
 vector:
-  dimensions: 4096
+  dimensions: 1536
   index_type: "hnsw"
   distance_metric: "cosine"
   ivfflat_lists: 100

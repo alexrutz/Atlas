@@ -125,7 +125,7 @@ CREATE TABLE rag.chunk_embeddings (
     id          SERIAL PRIMARY KEY,
     chunk_id    INTEGER NOT NULL REFERENCES rag.chunks(id) ON DELETE CASCADE,
     model_name  VARCHAR(200) NOT NULL,
-    embedding   vector(4096),
+    embedding   vector(1536),
     created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(chunk_id, model_name)
 );
