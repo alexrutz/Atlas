@@ -78,7 +78,7 @@ llm:
 
 # -----------------------------------------------------------------------------
 # Embedding Configuration (llama-server, CPU)
-# Model: mixedbread-ai/mxbai-embed-large-v1 (1024-dim)
+# Model: perplexity-ai/pplx-embed-context-v1-0.6b (1024-dim)
 # -----------------------------------------------------------------------------
 embedding:
   base_url: "http://llama-embed:8081"
