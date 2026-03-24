@@ -221,7 +221,6 @@ def _get_converter():
             InputFormat.PPTX,
             InputFormat.XLSX,
             InputFormat.HTML,
-            InputFormat.XML,
             InputFormat.CSV,
             InputFormat.MD,
             InputFormat.ASCIIDOC,
@@ -534,7 +533,7 @@ async def convert(
     """
     Parse and chunk a document using the Docling ML pipeline.
 
-    Accepts: PDF, DOCX, XLSX, PPTX, HTML, XML, CSV, MD, AsciiDoc, images.
+    Accepts: PDF, DOCX, XLSX, PPTX, HTML, CSV, MD, AsciiDoc, images.
 
     The pipeline:
     1. **Layout analysis** detects headings, tables, figures, lists, code blocks
