@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
     logger.info("Atlas RAG System starting...")
     logger.info(f"LLM: {settings.llm.model} @ {settings.llm.base_url}")
     logger.info(f"Embedding: {settings.embedding.model} @ {settings.embedding.base_url}")
-    logger.info(f"VLM-OCR: {settings.vlm_ocr.model} @ {settings.vlm_ocr.base_url}")
+    logger.info(f"Docling API: {settings.docling.base_url}")
 
     # Create schemas and tables
     # Advisory lock serialises parallel workers so only one creates the tables.

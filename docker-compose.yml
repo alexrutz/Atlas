@@ -32,30 +32,25 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # vLLM - LLM Server (OpenAI-compatible API, GPU)
-  # Model: Qwen3.5-35B-A3B (MoE, ~3.5B active parameters)
-  # Configure via .env: LLM_MODEL, LLM_MAX_MODEL_LEN, LLM_GPU_UTIL
+  # llama-server - LLM Server (OpenAI-compatible API, GPU)
+  # Requires a GGUF model file; configure via .env: LLM_MODEL_FILE, etc.
   # ---------------------------------------------------------------------------
-  vllm-llm:
-    image: vllm/vllm-openai:latest
-    container_name: atlas-vllm-llm
+  llama-llm:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: atlas-llama-llm
     restart: unless-stopped
+    user: root
     ports:
       - "8080:8080"
     volumes:
       - ../models:/models
-    environment:
-      - HF_HOME=/models/huggingface
-      - VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
     command: >
-      --model ${LLM_MODEL:-Qwen/Qwen3.5-35B-A3B}
+      --model /models/${LLM_MODEL_FILE}
       --port 8080
-      --max-model-len ${LLM_MAX_MODEL_LEN:-65536}
-      --gpu-memory-utilization ${LLM_GPU_UTIL:-0.55}
-      --enable-reasoning
-      --reasoning-parser deepseek_r1
-      --trust-remote-code
-      --dtype auto
+      --host 0.0.0.0
+      --n-gpu-layers ${LLM_N_GPU_LAYERS:--1}
+      --ctx-size ${LLM_CTX_SIZE:-65536}
+      --alias llm
     deploy:
       resources:
         reservations:
@@ -73,28 +68,26 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # vLLM - Embedding Server (GPU-accelerated)
-  # Model: pplx-embed-context-4b (4B parameters)
-  # Configure via .env: EMBED_MODEL, EMBED_GPU_UTIL
+  # llama-server - Embedding Server (GPU-accelerated)
+  # Requires a GGUF model file; configure via .env: EMBED_MODEL_FILE, etc.
   # ---------------------------------------------------------------------------
-  vllm-embed:
-    image: vllm/vllm-openai:latest
-    container_name: atlas-vllm-embed
+  llama-embed:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: atlas-llama-embed
     restart: unless-stopped
+    user: root
     ports:
       - "8081:8081"
     volumes:
       - ../models:/models
-    environment:
-      - HF_HOME=/models/huggingface
     command: >
-      --model ${EMBED_MODEL:-pplx-ai/pplx-embed-context-4b}
+      --model /models/${EMBED_MODEL_FILE}
       --port 8081
-      --task embed
-      --gpu-memory-utilization ${EMBED_GPU_UTIL:-0.20}
-      --max-model-len ${EMBED_MAX_MODEL_LEN:-32768}
-      --trust-remote-code
-      --dtype auto
+      --host 0.0.0.0
+      --n-gpu-layers ${EMBED_N_GPU_LAYERS:--1}
+      --ctx-size ${EMBED_CTX_SIZE:-8192}
+      --embeddings
+      --alias embed
     deploy:
       resources:
         reservations:
@@ -112,40 +105,42 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # vLLM - VLM OCR Server (GPU-accelerated)
-  # Model: Qianfan-OCR (Vision-Language Model for layout-aware OCR)
-  # Configure via .env: VLM_MODEL, VLM_GPU_UTIL
+  # Docling API (document parsing & chunking)
+  # ML-powered layout analysis, table structure recognition, HybridChunker.
+  # Supports: PDF, DOCX, XLSX, PPTX, HTML, XML, CSV, MD, images
+  # Configure via .env: DOCLING_* variables
   # ---------------------------------------------------------------------------
-  vllm-ocr:
-    image: vllm/vllm-openai:latest
-    container_name: atlas-vllm-ocr
+  docling-api:
+    build:
+      context: ./docling-api
+      dockerfile: Dockerfile
+    container_name: atlas-docling-api
     restart: unless-stopped
     ports:
-      - "8082:8082"
-    volumes:
-      - ../models:/models
+      - "8090:8090"
     environment:
-      - HF_HOME=/models/huggingface
-    command: >
-      --model ${VLM_MODEL:-stepfun-ai/Qianfan-OCR}
-      --port 8082
-      --gpu-memory-utilization ${VLM_GPU_UTIL:-0.20}
-      --max-model-len ${VLM_MAX_MODEL_LEN:-32768}
-      --trust-remote-code
-      --dtype auto
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - DOCLING_DO_OCR=${DOCLING_DO_OCR:-true}
+      - DOCLING_OCR_BACKEND=${DOCLING_OCR_BACKEND:-auto}
+      - DOCLING_OCR_LANG=${DOCLING_OCR_LANG:-}
+      - DOCLING_DO_TABLE_STRUCTURE=${DOCLING_DO_TABLE_STRUCTURE:-true}
+      - DOCLING_TABLE_MODE=${DOCLING_TABLE_MODE:-fast}
+      - DOCLING_DO_CODE_ENRICHMENT=${DOCLING_DO_CODE_ENRICHMENT:-true}
+      - DOCLING_ACCELERATOR_DEVICE=${DOCLING_ACCELERATOR_DEVICE:-auto}
+      - DOCLING_FLASH_ATTENTION=${DOCLING_FLASH_ATTENTION:-false}
+      - DOCLING_OCR_BATCH_SIZE=${DOCLING_OCR_BATCH_SIZE:-4}
+      - DOCLING_LAYOUT_BATCH_SIZE=${DOCLING_LAYOUT_BATCH_SIZE:-4}
+      - DOCLING_TABLE_BATCH_SIZE=${DOCLING_TABLE_BATCH_SIZE:-4}
+      - DOCLING_DOCUMENT_TIMEOUT=${DOCLING_DOCUMENT_TIMEOUT:-300}
+      - DOCLING_IMAGES_SCALE=${DOCLING_IMAGES_SCALE:-2.0}
+      - DOCLING_GENERATE_PICTURES=${DOCLING_GENERATE_PICTURES:-false}
+      - DOCLING_WARMUP=${DOCLING_WARMUP:-true}
+      - DOCLING_DEFAULT_TOKENIZER=${DOCLING_DEFAULT_TOKENIZER:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
       interval: 30s
       timeout: 10s
       retries: 10
-      start_period: 120s
+      start_period: 180s
     networks:
       - atlas-network
 
@@ -172,11 +167,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      vllm-llm:
+      llama-llm:
         condition: service_healthy
-      vllm-embed:
+      llama-embed:
         condition: service_healthy
-      vllm-ocr:
+      docling-api:
         condition: service_healthy
     networks:
       - atlas-network

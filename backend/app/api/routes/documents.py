@@ -185,6 +185,7 @@ async def get_status(
         processing_status=document.processing_status,
         processing_error=document.processing_error,
         chunk_count=document.chunk_count,
+        metadata_=document.metadata_,
     )
 
 

@@ -125,15 +125,15 @@ CREATE TABLE rag.chunk_embeddings (
     id          SERIAL PRIMARY KEY,
     chunk_id    INTEGER NOT NULL REFERENCES rag.chunks(id) ON DELETE CASCADE,
     model_name  VARCHAR(200) NOT NULL,
-    embedding   vector(4096),
+    embedding   vector(1024),
     created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(chunk_id, model_name)
 );
 
--- Vector index for similarity search (IVFFlat)
+-- Vector index for similarity search (HNSW - supports >2000 dimensions)
 CREATE INDEX idx_chunk_embeddings_vector ON rag.chunk_embeddings
-    USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100);
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
 
 CREATE INDEX idx_chunk_embeddings_chunk ON rag.chunk_embeddings(chunk_id);
 CREATE INDEX idx_chunk_embeddings_model ON rag.chunk_embeddings(model_name);

@@ -1,9 +1,6 @@
 FROM python:3.12-slim
 
-# System-Abhängigkeiten für OCR und PDF-Verarbeitung
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
-    tesseract-ocr-deu \
     poppler-utils \
     libpq-dev \
     gcc \
