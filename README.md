@@ -76,6 +76,11 @@ openssl rand -hex 32
 | `ADMIN_DEFAULT_PASSWORD` | `admin` | Initial admin password |
 | `LLM_MODEL` | `Qwen/Qwen3.5-35B-A3B` | HuggingFace model ID for chat/reasoning |
 | `EMBED_MODEL` | `pplx-ai/pplx-embed-context-4b` | HuggingFace model ID for embeddings |
+| `DOCLING_DO_OCR` | `true` | Enable OCR for scanned documents |
+| `DOCLING_OCR_BACKEND` | `easyocr` | OCR backend: `easyocr` (GPU) or `tesseract` |
+| `DOCLING_TABLE_MODE` | `fast` | Table recognition: `fast` or `accurate` |
+| `DOCLING_DO_CODE_ENRICHMENT` | `true` | Detect and label code blocks |
+| `DOCLING_ACCELERATOR_DEVICE` | `auto` | GPU device: `auto`, `cuda`, `mps`, `cpu` |
 
 ---
 
@@ -126,7 +131,14 @@ Two parameter sets are used depending on whether thinking mode is enabled:
 
 Documents are processed through two pipelines depending on format:
 
-- **Docling API** (PDF, DOCX, XLSX, PPTX, HTML, XML): ML-powered layout analysis with table structure recognition and token-aware HybridChunker
+- **Docling API** (PDF, DOCX, XLSX, PPTX, HTML, XML, images): Dedicated container running Docling's ML pipeline:
+  - **Layout analysis** (DocLayNet model) detects headings, tables, figures, lists, code blocks
+  - **Table structure** (TableFormer) recognizes rows, columns, and cell spans
+  - **OCR** (EasyOCR or Tesseract) extracts text from scanned documents and images
+  - **Code enrichment** detects and labels code blocks
+  - **HybridChunker** produces token-aware chunks aligned to the embedding model's tokenizer
+  - **Contextualization** prepends heading/caption context to each chunk for better embedding quality
+  - Document statistics (tables, figures, headings, code blocks) stored as metadata
 - **Local** (TXT, MD, CSV, JSON): Simple text extraction with configurable chunking strategies
 
 ### RAG Pipeline

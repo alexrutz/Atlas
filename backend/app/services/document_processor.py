@@ -1,10 +1,11 @@
 """
 Document Processor - Parsing and chunking of documents.
 
-Routes documents to the Docling API (PDF, DOCX, XLSX, PPTX, HTML, XML) or
-handles simple formats locally (TXT, MD, CSV, JSON).
+Routes documents to the Docling API (PDF, DOCX, XLSX, PPTX, HTML, XML, images)
+or handles simple formats locally (TXT, MD, CSV, JSON).
 
 Chunks are stored in rag.chunks, embeddings in rag.chunk_embeddings.
+Document-level metadata (stats, parse timings) stored in content.documents.metadata.
 """
 
 import asyncio
@@ -44,7 +45,8 @@ class DocumentProcessor:
         3. Use Docling chunks if available, otherwise chunk locally
         4. Compute embedding for each chunk
         5. Store chunks + embeddings
-        6. Update document status
+        6. Store document-level metadata (stats, timings)
+        7. Update document status
         """
         result = await self.db.execute(select(Document).where(Document.id == document_id))
         document = result.scalar_one_or_none()
@@ -81,8 +83,19 @@ class DocumentProcessor:
             chunk_objects = []
 
             for i, chunk_data in enumerate(chunks):
+                # Use contextualized text for embedding (includes heading/caption context)
                 embed_text = chunk_data.contextualized_text or chunk_data.text
                 chunk_texts.append(embed_text)
+
+                # Build chunk metadata
+                chunk_meta = {
+                    "parser": parsed.metadata.get("parser", pipeline),
+                    "chunker": chunker_type,
+                }
+                if chunk_data.contextualized_text:
+                    chunk_meta["has_context"] = True
+                if chunk_data.labels:
+                    chunk_meta["labels"] = chunk_data.labels
 
                 chunk_obj = Chunk(
                     document_id=document.id,
@@ -90,11 +103,8 @@ class DocumentProcessor:
                     content=chunk_data.text,
                     section_header=chunk_data.section_header,
                     page_number=chunk_data.page_number,
-                    metadata_={
-                        "parser": parsed.metadata.get("parser", pipeline),
-                        "chunker": chunker_type,
-                        **({"has_context": True} if chunk_data.contextualized_text else {}),
-                    },
+                    token_count=chunk_data.token_count,
+                    metadata_=chunk_meta,
                 )
                 chunk_objects.append(chunk_obj)
                 self.db.add(chunk_obj)
@@ -114,12 +124,29 @@ class DocumentProcessor:
                 )
                 self.db.add(emb_obj)
 
+            # Store document-level metadata (stats, parse info)
+            doc_meta = dict(parsed.metadata)
+            if parsed.stats:
+                doc_meta["stats"] = {
+                    "num_pages": parsed.stats.num_pages,
+                    "num_tables": parsed.stats.num_tables,
+                    "num_figures": parsed.stats.num_figures,
+                    "num_headings": parsed.stats.num_headings,
+                    "num_text_elements": parsed.stats.num_text_elements,
+                    "num_list_items": parsed.stats.num_list_items,
+                    "num_code_blocks": parsed.stats.num_code_blocks,
+                }
+            document.metadata_ = doc_meta
+
             # Update document status
             document.processing_status = "completed"
             document.chunk_count = len(chunk_objects)
             await self.db.flush()
 
-            logger.info(f"Document {document.original_name} processed: {len(chunk_objects)} chunks")
+            logger.info(
+                f"Document {document.original_name} processed: "
+                f"{len(chunk_objects)} chunks, pipeline={pipeline}"
+            )
 
         except Exception as e:
             logger.error(f"Error processing document {document_id}: {e}")

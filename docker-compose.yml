@@ -114,6 +114,7 @@ services:
   # ---------------------------------------------------------------------------
   # Docling API (document parsing & chunking)
   # ML-powered layout analysis, table structure recognition, HybridChunker.
+  # Supports: PDF, DOCX, XLSX, PPTX, HTML, XML, CSV, MD, images
   # Configure via .env: DOCLING_* variables
   # ---------------------------------------------------------------------------
   docling-api:
@@ -126,16 +127,22 @@ services:
       - "8090:8090"
     environment:
       - DOCLING_DO_OCR=${DOCLING_DO_OCR:-true}
+      - DOCLING_OCR_BACKEND=${DOCLING_OCR_BACKEND:-easyocr}
+      - DOCLING_OCR_LANG=${DOCLING_OCR_LANG:-}
       - DOCLING_DO_TABLE_STRUCTURE=${DOCLING_DO_TABLE_STRUCTURE:-true}
       - DOCLING_TABLE_MODE=${DOCLING_TABLE_MODE:-fast}
+      - DOCLING_DO_CODE_ENRICHMENT=${DOCLING_DO_CODE_ENRICHMENT:-true}
       - DOCLING_ACCELERATOR_DEVICE=${DOCLING_ACCELERATOR_DEVICE:-auto}
+      - DOCLING_IMAGES_SCALE=${DOCLING_IMAGES_SCALE:-2.0}
+      - DOCLING_GENERATE_PICTURES=${DOCLING_GENERATE_PICTURES:-false}
+      - DOCLING_WARMUP=${DOCLING_WARMUP:-true}
       - DOCLING_DEFAULT_TOKENIZER=${DOCLING_DEFAULT_TOKENIZER:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
       interval: 30s
       timeout: 10s
       retries: 10
-      start_period: 120s
+      start_period: 180s
     networks:
       - atlas-network
 

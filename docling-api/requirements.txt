@@ -1,6 +1,13 @@
 # Docling API service dependencies
+
+# Web Framework
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
+
+# Docling ML pipeline (parsing + chunking)
 docling>=2.31.0
 docling-core[chunking]>=2.31.0
+
+# OCR backends
+easyocr>=1.7

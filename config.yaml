@@ -89,14 +89,15 @@ embedding:
 
 # -----------------------------------------------------------------------------
 # Docling API (document parsing & chunking via dedicated container)
-# Handles: PDF, DOCX, XLSX, PPTX, HTML, XML
+# Handles: PDF, DOCX, XLSX, PPTX, HTML, XML, images
 # ML-powered layout analysis, table structure recognition, HybridChunker
+# Pipeline options (OCR backend, table mode, etc.) configured via .env
 # -----------------------------------------------------------------------------
 docling:
   base_url: "http://docling-api:8090"
   max_tokens: 512                # Token limit per chunk for HybridChunker
   merge_peers: true              # Merge undersized adjacent chunks with same headings
-  tokenizer: ""                  # HuggingFace tokenizer (empty = use embedding model name)
+  tokenizer: ""                  # HuggingFace tokenizer (empty = auto-use embedding model)
 
 # -----------------------------------------------------------------------------
 # Document Processing (local chunking for text-based formats)
@@ -143,6 +144,12 @@ documents:
     - ".html"
     - ".xml"
     - ".json"
+    - ".png"
+    - ".jpg"
+    - ".jpeg"
+    - ".tiff"
+    - ".tif"
+    - ".bmp"
   max_file_size_mb: 100
   temp_upload_dir: "/tmp/atlas_uploads"
 
