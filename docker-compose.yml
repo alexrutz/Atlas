@@ -89,7 +89,7 @@ services:
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - embed_model_cache:/data
-    command: --model-id perplexity-ai/pplx-embed-context-v1-0.6b --port 8081 --hostname 0.0.0.0
+    command: --model-id perplexity-ai/pplx-embed-context-v1-0.6b --port 8081 --hostname 0.0.0.0 --dtype float32
     deploy:
       resources:
         reservations:
