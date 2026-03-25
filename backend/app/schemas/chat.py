@@ -1,0 +1,97 @@
+"""Pydantic Schemas für Chat/RAG."""
+
+from datetime import datetime
+
+from pydantic import BaseModel
+
+
+class ChatRequest(BaseModel):
+    question: str
+    conversation_id: int | None = None
+    collection_ids: list[int] | None = None
+    enable_thinking: bool = False
+    enable_enrichment_thinking: bool = False
+    enable_enrichment: bool = True
+    rag_mode: bool = True
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    conversation_id: int
+    sources: list["SourceChunk"]
+
+
+class SourceChunk(BaseModel):
+    chunk_id: int
+    document_id: int | None = None
+    document_name: str
+    collection_name: str
+    content_preview: str
+    page_number: int | None
+    similarity_score: float
+
+
+class ConversationResponse(BaseModel):
+    id: int
+    title: str | None
+    created_at: datetime
+    message_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class RagChunk(BaseModel):
+    document_id: int | None = None
+    document_name: str
+    collection_name: str
+    page_number: int | None
+    content: str
+    similarity_score: float
+
+
+class DocumentDeliveryResponse(BaseModel):
+    document_id: int
+    document_name: str
+    collection_name: str
+    file_type: str
+    page_count: int
+    reason: str = ""
+
+
+class MessageResponse(BaseModel):
+    id: int
+    role: str
+    content: str
+    sources: list[SourceChunk] = []
+    enriched_query: str | None = None
+    rag_chunks: list[RagChunk] = []
+    thinking: str | None = None
+    document_delivery: DocumentDeliveryResponse | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SelectedCollectionsUpdate(BaseModel):
+    collection_ids: list[int]
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: "UserBrief"
+
+
+class UserBrief(BaseModel):
+    id: int
+    username: str
+    full_name: str
+    is_admin: bool
+
+    model_config = {"from_attributes": True}

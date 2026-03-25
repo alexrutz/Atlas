@@ -1,0 +1,224 @@
+# =============================================================================
+# Atlas RAG System - Docker Compose
+# =============================================================================
+# Starts all required services for the Atlas RAG system.
+# Usage: docker compose up -d
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL with pgvector extension
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: atlas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: atlas
+      POSTGRES_USER: atlas_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ../postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas_user -d atlas"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
+  # llama-server - LLM Server (OpenAI-compatible API, CUDA GPU)
+  # Downloads the model directly from Hugging Face on first start.
+  # --jinja enables Jinja2 chat templates so thinking can be controlled
+  # at runtime via the model's built-in template (enable_thinking parameter).
+  # ---------------------------------------------------------------------------
+  llama-llm:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: atlas-llama-llm
+    restart: unless-stopped
+    user: root
+    ports:
+      - "8080:8080"
+    environment:
+      - HF_HOME=/models
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - ../models:/models
+    command: >
+      --hf-repo unsloth/Qwen3.5-35B-A3B-GGUF
+      --hf-file Qwen3.5-35B-A3B-UD-IQ3_S.gguf
+      --port 8080
+      --host 0.0.0.0
+      --n-gpu-layers ${LLM_N_GPU_LAYERS:--1}
+      --ctx-size ${LLM_CTX_SIZE:-65536}
+      --alias llm
+      --jinja
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
+  # llama-embed - Embedding Server (OpenAI-compatible API, CPU)
+  # Serves mixedbread-ai/mxbai-embed-large-v1 (1024-dim embeddings).
+  # OpenAI-compatible /v1/embeddings endpoint on port 8081.
+  # Model is downloaded from Hugging Face on first start; cached in embed_model_cache.
+  # Runs on CPU (--n-gpu-layers 0) so the LLM keeps full VRAM.
+  # ---------------------------------------------------------------------------
+  llama-embed:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: atlas-llama-embed
+    restart: unless-stopped
+    user: root
+    ports:
+      - "8081:8081"
+    volumes:
+      - ../models:/models
+    command: >
+      -m /models/pplx-embed-context-v1-0.6b-q8_0.gguf
+      --port 8081
+      --host 0.0.0.0
+      --n-gpu-layers 0
+      --ctx-size ${EMBED_CTX_SIZE:-512}
+      --batch-size 32
+      --alias embed
+      --embedding
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
+  # Docling API (document parsing & chunking)
+  # ML-powered layout analysis, table structure recognition, HybridChunker.
+  # Supports: PDF, DOCX, XLSX, PPTX, HTML, XML, CSV, MD, images
+  # Configure via .env: DOCLING_* variables
+  # ---------------------------------------------------------------------------
+  docling-api:
+    build:
+      context: ./docling-api
+      dockerfile: Dockerfile
+    container_name: atlas-docling-api
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - DOCLING_DO_OCR=${DOCLING_DO_OCR:-true}
+      - DOCLING_OCR_BACKEND=${DOCLING_OCR_BACKEND:-auto}
+      - DOCLING_OCR_LANG=${DOCLING_OCR_LANG:-}
+      - DOCLING_DO_TABLE_STRUCTURE=${DOCLING_DO_TABLE_STRUCTURE:-true}
+      - DOCLING_TABLE_MODE=${DOCLING_TABLE_MODE:-fast}
+      - DOCLING_DO_CODE_ENRICHMENT=${DOCLING_DO_CODE_ENRICHMENT:-true}
+      - DOCLING_ACCELERATOR_DEVICE=cpu
+      - DOCLING_FLASH_ATTENTION=${DOCLING_FLASH_ATTENTION:-false}
+      - DOCLING_OCR_BATCH_SIZE=${DOCLING_OCR_BATCH_SIZE:-4}
+      - DOCLING_LAYOUT_BATCH_SIZE=${DOCLING_LAYOUT_BATCH_SIZE:-4}
+      - DOCLING_TABLE_BATCH_SIZE=${DOCLING_TABLE_BATCH_SIZE:-4}
+      - DOCLING_DOCUMENT_TIMEOUT=${DOCLING_DOCUMENT_TIMEOUT:-300}
+      - DOCLING_IMAGES_SCALE=${DOCLING_IMAGES_SCALE:-2.0}
+      - DOCLING_GENERATE_PICTURES=${DOCLING_GENERATE_PICTURES:-false}
+      - DOCLING_WARMUP=${DOCLING_WARMUP:-true}
+      - DOCLING_DEFAULT_TOKENIZER=${DOCLING_DEFAULT_TOKENIZER:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
+  # Atlas Backend (FastAPI)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: atlas-backend
+    restart: unless-stopped
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY must be set}
+      ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-admin}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - upload_data:/tmp/atlas_uploads
+      - ./logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      llama-llm:
+        condition: service_healthy
+      llama-embed:
+        condition: service_healthy
+      docling-api:
+        condition: service_healthy
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
+  # LLM Diagnostic Viewer (tails diagnostic log with colored output)
+  # ---------------------------------------------------------------------------
+  llm-diagnostic:
+    image: alpine:3.20
+    container_name: atlas-llm-diagnostic
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for diagnostic log file..."
+        while [ ! -f /logs/llm_diagnostic.log ]; do sleep 1; done
+        echo "Tailing LLM diagnostic log..."
+        tail -f /logs/llm_diagnostic.log
+    volumes:
+      - ./logs:/logs:ro
+    depends_on:
+      - backend
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
+  # Atlas Frontend (React)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: atlas-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - atlas-network
+
+volumes:
+  upload_data:
+
+networks:
+  atlas-network:
+    driver: bridge

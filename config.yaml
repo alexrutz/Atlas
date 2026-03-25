@@ -1,0 +1,177 @@
+# =============================================================================
+# Atlas RAG System - Central Configuration
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Server Configuration
+# -----------------------------------------------------------------------------
+server:
+  host: "0.0.0.0"
+  port: 8000
+  frontend_port: 3000
+  workers: 4
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://${HOSTNAME}:3000"
+  log_level: "info"
+
+# -----------------------------------------------------------------------------
+# Database Configuration (PostgreSQL)
+# -----------------------------------------------------------------------------
+database:
+  host: "postgres"
+  port: 5432
+  name: "atlas"
+  user: "atlas_user"
+  password: "${DB_PASSWORD}"
+  pool_size: 20
+  max_overflow: 10
+  echo_sql: false
+
+# -----------------------------------------------------------------------------
+# pgvector Configuration
+# -----------------------------------------------------------------------------
+vector:
+  dimensions: 1024
+  index_type: "hnsw"
+  distance_metric: "cosine"
+  ivfflat_lists: 100
+  hnsw_m: 16
+  hnsw_ef_construction: 64
+  probes: 10
+
+# -----------------------------------------------------------------------------
+# LLM Configuration (llama-server OpenAI-compatible API)
+# Model: GGUF file configured via LLM_MODEL_FILE in .env
+# -----------------------------------------------------------------------------
+llm:
+  base_url: "http://llama-llm:8080"
+  model: "llm"
+  max_tokens: 65536
+  context_window: 65536
+  timeout: 120
+  sampling:
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+    min_p: 0.0
+    presence_penalty: 1.5
+    repetition_penalty: 1.0
+  thinking_sampling:
+    temperature: 1.0
+    top_p: 0.95
+    top_k: 20
+    min_p: 0.0
+    presence_penalty: 1.5
+    repetition_penalty: 1.0
+  system_prompt: |
+    You are Atlas, an AI assistant for internal company documents.
+    You answer exclusively based on the provided documents.
+    If you cannot find something in the documents, say so honestly.
+    Answer in the same language the user asks in.
+    Always cite the sources of your answer.
+  enrichment_system_prompt: |
+    You are part of an RAG-Workflow and you rephrase the starting query to include only the relevant information from context and the starting query and formulate the resulting query.
+  free_chat_system_prompt: |
+    You are Atlas, a helpful AI assistant. Answer clearly and concisely.
+    Answer in the same language the user asks in.
+
+# -----------------------------------------------------------------------------
+# Embedding Configuration (llama-server, CPU)
+# Model: perplexity-ai/pplx-embed-context-v1-0.6b (1024-dim)
+# -----------------------------------------------------------------------------
+embedding:
+  base_url: "http://llama-embed:8081"
+  model: "embed"
+  batch_size: 32
+  max_retries: 3
+  timeout: 60
+
+# -----------------------------------------------------------------------------
+# Docling API (document parsing & chunking via dedicated container)
+# Handles: PDF, DOCX, XLSX, PPTX, HTML, XML, images
+# ML-powered layout analysis, table structure recognition, HybridChunker
+# Pipeline options (OCR backend, table mode, etc.) configured via .env
+# -----------------------------------------------------------------------------
+docling:
+  base_url: "http://docling-api:8090"
+  max_tokens: 512                # Token limit per chunk for HybridChunker
+  merge_peers: true              # Merge undersized adjacent chunks with same headings
+  tokenizer: ""                  # HuggingFace tokenizer (empty = auto-use embedding model)
+
+# -----------------------------------------------------------------------------
+# Document Processing (local chunking for text-based formats)
+# Used for TXT, MD, CSV, JSON files that don't need ML parsing.
+# -----------------------------------------------------------------------------
+chunking:
+  strategy: "semantic"
+  chunk_size: 512
+  chunk_overlap: 50
+  min_chunk_size: 100
+  max_chunk_size: 1024
+  separators:
+    - "\n\n"
+    - "\n"
+    - ". "
+    - " "
+
+# -----------------------------------------------------------------------------
+# Retrieval Configuration
+# -----------------------------------------------------------------------------
+retrieval:
+  top_k: 10
+  rerank: true
+  rerank_model: "ms-marco-MiniLM-L-12-v2"
+  rerank_top_k: 5
+  similarity_threshold: 0.3
+  query_enrichment:
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Supported File Formats
+# -----------------------------------------------------------------------------
+documents:
+  supported_formats:
+    - ".pdf"
+    - ".docx"
+    - ".doc"
+    - ".xlsx"
+    - ".xls"
+    - ".pptx"
+    - ".txt"
+    - ".md"
+    - ".csv"
+    - ".html"
+    - ".xml"
+    - ".json"
+    - ".png"
+    - ".jpg"
+    - ".jpeg"
+    - ".tiff"
+    - ".tif"
+    - ".bmp"
+  max_file_size_mb: 100
+  temp_upload_dir: "/tmp/atlas_uploads"
+
+# -----------------------------------------------------------------------------
+# Authentication & Authorization
+# -----------------------------------------------------------------------------
+auth:
+  secret_key: "${AUTH_SECRET_KEY}"
+  algorithm: "HS256"
+  access_token_expire_minutes: 480
+  refresh_token_expire_days: 30
+  min_password_length: 5
+  default_admin_username: "admin"
+  default_admin_password: "${ADMIN_DEFAULT_PASSWORD}"
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/atlas.log"
+  max_file_size_mb: 50
+  backup_count: 5
+  log_queries: false
