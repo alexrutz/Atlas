@@ -1,8 +1,8 @@
 """
-Document parsers - routes documents to the Docling API or local text parsers.
+Document parsers - routes documents to docling-serve or local text parsers.
 
 Supported formats:
-- Docling API: PDF, DOCX, XLSX, PPTX, HTML, XML, images (ML-powered parsing + chunking)
+- Docling Serve: PDF, DOCX, XLSX, PPTX, HTML, XML, images (ML-powered parsing + chunking)
 - Local: TXT, MD, CSV, JSON (simple text extraction, no ML needed)
 """
 
@@ -60,7 +60,7 @@ class ParsedDocument:
     stats: DocumentStats = field(default_factory=DocumentStats)
 
 
-# Formats handled by the Docling API (ML-powered parsing)
+# Formats handled by docling-serve (ML-powered parsing)
 DOCLING_FORMATS = {
     ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx",
     ".html", ".xml",
@@ -73,7 +73,7 @@ LOCAL_FORMATS = {".txt", ".md", ".csv", ".json"}
 
 def parse_document(file_path: str, file_type: str) -> ParsedDocument:
     """
-    Parse a document, routing to Docling API or local parser as appropriate.
+    Parse a document, routing to docling-serve or local parser as appropriate.
 
     Args:
         file_path: Path to the file
@@ -85,7 +85,7 @@ def parse_document(file_path: str, file_type: str) -> ParsedDocument:
     ext = file_type.lower()
 
     if ext in DOCLING_FORMATS:
-        return _parse_with_docling_api(file_path, ext)
+        return _parse_with_docling_serve(file_path, ext)
     elif ext in LOCAL_FORMATS:
         return _parse_locally(file_path, ext)
     else:
@@ -93,54 +93,57 @@ def parse_document(file_path: str, file_type: str) -> ParsedDocument:
 
 
 # =============================================================================
-# Docling API (remote ML parsing + chunking)
+# Docling Serve (official pre-built image, ML parsing + chunking)
 # =============================================================================
 
 _MAX_RETRIES = 2
 _RETRY_DELAY = 3.0
 
 
-def _parse_with_docling_api(file_path: str, file_type: str) -> ParsedDocument:
-    """Parse a document via the Docling API service.
+def _parse_with_docling_serve(file_path: str, file_type: str) -> ParsedDocument:
+    """Parse and chunk a document via the official docling-serve API.
 
-    Passes the configured tokenizer (docling.tokenizer in config.yaml) to the
-    HybridChunker; if unset, docling-api falls back to bert-base-uncased.
-    Retries on transient failures.
+    Calls POST /v1/chunk/hybrid/file with include_converted_doc=true so we get
+    both the chunks AND the full markdown text in one request.
+    Retries on transient server errors.
     """
     from app.core.config import settings
 
     cfg = settings.docling
-    url = f"{cfg.base_url}/convert"
+    url = f"{cfg.base_url}/v1/chunk/hybrid/file"
 
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    # Use explicitly configured tokenizer; if unset, let docling-api use its default
-    tokenizer = cfg.tokenizer
-
     with open(path, "rb") as f:
         file_bytes = f.read()
 
-    data = {
-        "max_tokens": str(cfg.max_tokens),
-        "merge_peers": str(cfg.merge_peers).lower(),
-        "tokenizer": tokenizer,
+    # Build the multipart form data:
+    # - "files" is the uploaded file
+    # - "chunking_*" fields control the HybridChunker
+    # - "include_converted_doc" gives us the full markdown text too
+    tokenizer = cfg.tokenizer or "bert-base-uncased"
+    form_data = {
+        "chunking_max_tokens": str(cfg.max_tokens),
+        "chunking_merge_peers": str(cfg.merge_peers).lower(),
+        "chunking_tokenizer": tokenizer,
+        "include_converted_doc": "true",
     }
 
     last_error = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
             logger.info(
-                f"Sending {path.name} to Docling API at {url}"
+                f"Sending {path.name} to docling-serve at {url}"
                 + (f" (retry {attempt})" if attempt > 0 else "")
             )
 
-            files = {"file": (path.name, file_bytes, "application/octet-stream")}
+            files = {"files": (path.name, file_bytes, "application/octet-stream")}
             response = httpx.post(
                 url,
                 files=files,
-                data=data,
+                data=form_data,
                 timeout=httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=30.0),
             )
 
@@ -148,75 +151,94 @@ def _parse_with_docling_api(file_path: str, file_type: str) -> ParsedDocument:
                 break
             else:
                 last_error = RuntimeError(
-                    f"Docling API error ({response.status_code}): {response.text}"
+                    f"docling-serve error ({response.status_code}): {response.text}"
                 )
                 if response.status_code < 500:
                     raise last_error  # Client error, don't retry
         except httpx.TimeoutException as e:
             last_error = e
-            logger.warning(f"Docling API timeout (attempt {attempt + 1}): {e}")
+            logger.warning(f"docling-serve timeout (attempt {attempt + 1}): {e}")
         except RuntimeError:
             raise
         except Exception as e:
             last_error = e
-            logger.warning(f"Docling API error (attempt {attempt + 1}): {e}")
+            logger.warning(f"docling-serve error (attempt {attempt + 1}): {e}")
 
         if attempt < _MAX_RETRIES:
-            import time as _time
-            _time.sleep(_RETRY_DELAY)
+            time.sleep(_RETRY_DELAY)
     else:
-        raise RuntimeError(f"Docling API failed after {_MAX_RETRIES + 1} attempts: {last_error}")
+        raise RuntimeError(f"docling-serve failed after {_MAX_RETRIES + 1} attempts: {last_error}")
 
     result = response.json()
 
-    # Parse sections
-    sections = [
-        ParsedSection(
-            header=s.get("header"),
-            content=s["content"],
-            page_number=s.get("page_number"),
-            label=s.get("label"),
-        )
-        for s in result.get("sections", [])
-    ]
+    # --- Extract full markdown text from the converted document ---
+    md_text = ""
+    documents = result.get("documents", [])
+    if documents:
+        content = documents[0].get("content", {})
+        md_text = content.get("md_content", "") or content.get("text_content", "") or ""
 
-    # Parse chunks
-    chunks = [
-        ChunkData(
-            text=c["text"],
-            section_header=c.get("section_header"),
-            page_number=c.get("page_number"),
-            contextualized_text=c.get("contextualized_text"),
-            token_count=c.get("token_count"),
-            labels=c.get("labels", []),
-        )
-        for c in result.get("chunks", [])
-    ]
+    # --- Convert chunks from docling-serve format to our ChunkData format ---
+    # docling-serve returns chunks with these fields:
+    #   text (contextualized), raw_text, num_tokens, headings, page_numbers, etc.
+    chunks = []
+    for c in result.get("chunks", []):
+        # "text" in docling-serve is already the contextualized text (with headings prepended)
+        contextualized = c.get("text", "")
+        # "raw_text" is the chunk text without heading context (only if include_raw_text was set)
+        raw_text = c.get("raw_text", "") or contextualized
 
-    # Parse stats
-    raw_stats = result.get("stats", {})
-    stats = DocumentStats(
-        num_pages=raw_stats.get("num_pages"),
-        num_tables=raw_stats.get("num_tables", 0),
-        num_figures=raw_stats.get("num_figures", 0),
-        num_headings=raw_stats.get("num_headings", 0),
-        num_text_elements=raw_stats.get("num_text_elements", 0),
-        num_list_items=raw_stats.get("num_list_items", 0),
-        num_code_blocks=raw_stats.get("num_code_blocks", 0),
-    )
+        # Build section header from the headings list
+        headings = c.get("headings", [])
+        section_header = " > ".join(headings) if headings else None
+
+        # Page numbers come as a list; take the first one
+        page_numbers = c.get("page_numbers", [])
+        page_number = page_numbers[0] if page_numbers else None
+
+        chunks.append(ChunkData(
+            text=raw_text,
+            section_header=section_header,
+            page_number=page_number,
+            contextualized_text=contextualized,
+            token_count=c.get("num_tokens"),
+            labels=[],
+        ))
+
+    # --- Build stats (docling-serve doesn't return stats directly, ---
+    # --- so we estimate from the converted document if available)  ---
+    stats = DocumentStats()
+    if documents:
+        timings = documents[0].get("timings", {})
+        # Page count can be inferred from the chunks' page numbers
+        all_pages = set()
+        for c in result.get("chunks", []):
+            for p in c.get("page_numbers", []):
+                all_pages.add(p)
+        if all_pages:
+            stats.num_pages = max(all_pages)
+
+    processing_time = result.get("processing_time", 0)
 
     logger.info(
-        f"Docling API: {path.name} → {len(sections)} sections, "
-        f"{len(chunks)} chunks, {stats.num_pages or '?'} pages, "
-        f"{stats.num_tables} tables, {stats.num_figures} figures "
-        f"(took {result.get('metadata', {}).get('total_time_s', '?')}s)"
+        f"docling-serve: {path.name} → {len(chunks)} chunks, "
+        f"{stats.num_pages or '?'} pages "
+        f"(took {processing_time:.1f}s)"
     )
 
     return ParsedDocument(
-        text=result.get("text", ""),
-        sections=sections,
+        text=md_text,
+        sections=[],  # docling-serve doesn't return sections separately
         page_count=stats.num_pages,
-        metadata=result.get("metadata", {"parser": "docling"}),
+        metadata={
+            "parser": "docling-serve",
+            "filename": path.name,
+            "file_type": file_type,
+            "file_size_bytes": len(file_bytes),
+            "total_time_s": round(processing_time, 2),
+            "tokenizer": tokenizer,
+            "max_tokens": cfg.max_tokens,
+        },
         chunks=chunks,
         stats=stats,
     )

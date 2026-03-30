@@ -88,13 +88,13 @@ embedding:
   timeout: 60
 
 # -----------------------------------------------------------------------------
-# Docling API (document parsing & chunking via dedicated container)
+# Docling Serve (official pre-built image for document parsing & chunking)
 # Handles: PDF, DOCX, XLSX, PPTX, HTML, XML, images
 # ML-powered layout analysis, table structure recognition, HybridChunker
-# Pipeline options (OCR backend, table mode, etc.) configured via .env
+# API docs: http://localhost:5001/docs
 # -----------------------------------------------------------------------------
 docling:
-  base_url: "http://docling-api:8090"
+  base_url: "http://docling-serve:5001"
   max_tokens: 512                # Token limit per chunk for HybridChunker
   merge_peers: true              # Merge undersized adjacent chunks with same headings
   tokenizer: ""                  # HuggingFace tokenizer (empty = auto-use embedding model)

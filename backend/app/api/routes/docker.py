@@ -20,7 +20,7 @@ COMPOSE_CONTAINER_NAMES = {
     "atlas-postgres",
     "atlas-vllm-llm",
     "atlas-vllm-embed",
-    "atlas-docling-api",
+    "atlas-docling-serve",
     "atlas-backend",
     "atlas-llm-diagnostic",
     "atlas-frontend",

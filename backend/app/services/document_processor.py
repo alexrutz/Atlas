@@ -57,7 +57,7 @@ class DocumentProcessor:
         try:
             # Parse file
             is_docling = document.file_type.lower() in DOCLING_FORMATS
-            pipeline = "docling-api" if is_docling else "local"
+            pipeline = "docling-serve" if is_docling else "local"
             logger.info(f"Parsing document: {document.original_name} (pipeline={pipeline})")
             parsed = await self._parse(document.file_path, document.file_type)
 

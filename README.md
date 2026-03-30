@@ -39,7 +39,7 @@ FastAPI Backend (port 8000)
     ├── PostgreSQL 16 + pgvector (port 5432)
     ├── llama-server LLM (port 8080) — Qwen3.5-35B-A3B GGUF, 65K context, GPU
     ├── llama-server Embedding (port 8081) — pplx-embed-context-v1-0.6b, 1024-dim, CPU
-    ├── Docling API (port 8090) — ML document parsing & chunking
+    ├── Docling Serve (port 5001) — ML document parsing & chunking (official image)
     └── Docker Socket (container management)
 
 LLM Diagnostic Sidecar (tails colored log output)
@@ -94,7 +94,7 @@ openssl rand -hex 32
 | PostgreSQL + pgvector | `atlas-postgres` | 5432 | Vector database with 1024-dim embeddings |
 | llama-server LLM | `atlas-llama-llm` | 8080 | Chat completion API (65K context, CUDA GPU) |
 | llama-server Embedding | `atlas-llama-embed` | 8081 | Embedding API (1024-dim, CPU) |
-| Docling API | `atlas-docling-api` | 8090 | ML document parsing & chunking |
+| Docling Serve | `atlas-docling-serve` | 5001 | ML document parsing & chunking (official image) |
 | FastAPI Backend | `atlas-backend` | 8000 | API server |
 | React Frontend + Nginx | `atlas-frontend` | 3000 | Web UI |
 | LLM Diagnostic | `atlas-llm-diagnostic` | — | Tails colored diagnostic logs |

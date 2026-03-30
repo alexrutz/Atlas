@@ -108,38 +108,23 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # Docling API (document parsing & chunking)
+  # Docling Serve (official pre-built image for document parsing & chunking)
   # ML-powered layout analysis, table structure recognition, HybridChunker.
   # Supports: PDF, DOCX, XLSX, PPTX, HTML, XML, CSV, MD, images
-  # Configure via .env: DOCLING_* variables
+  # API docs available at http://localhost:5001/docs
   # ---------------------------------------------------------------------------
-  docling-api:
-    build:
-      context: ./docling-api
-      dockerfile: Dockerfile
-    container_name: atlas-docling-api
+  docling-serve:
+    image: ghcr.io/docling-project/docling-serve
+    container_name: atlas-docling-serve
     restart: unless-stopped
     ports:
-      - "8090:8090"
+      - "5001:5001"
     environment:
-      - DOCLING_DO_OCR=${DOCLING_DO_OCR:-true}
-      - DOCLING_OCR_BACKEND=${DOCLING_OCR_BACKEND:-auto}
-      - DOCLING_OCR_LANG=${DOCLING_OCR_LANG:-}
-      - DOCLING_DO_TABLE_STRUCTURE=${DOCLING_DO_TABLE_STRUCTURE:-true}
-      - DOCLING_TABLE_MODE=${DOCLING_TABLE_MODE:-fast}
-      - DOCLING_DO_CODE_ENRICHMENT=${DOCLING_DO_CODE_ENRICHMENT:-true}
-      - DOCLING_ACCELERATOR_DEVICE=cpu
-      - DOCLING_FLASH_ATTENTION=${DOCLING_FLASH_ATTENTION:-false}
-      - DOCLING_OCR_BATCH_SIZE=${DOCLING_OCR_BATCH_SIZE:-4}
-      - DOCLING_LAYOUT_BATCH_SIZE=${DOCLING_LAYOUT_BATCH_SIZE:-4}
-      - DOCLING_TABLE_BATCH_SIZE=${DOCLING_TABLE_BATCH_SIZE:-4}
-      - DOCLING_DOCUMENT_TIMEOUT=${DOCLING_DOCUMENT_TIMEOUT:-300}
-      - DOCLING_IMAGES_SCALE=${DOCLING_IMAGES_SCALE:-2.0}
-      - DOCLING_GENERATE_PICTURES=${DOCLING_GENERATE_PICTURES:-false}
-      - DOCLING_WARMUP=${DOCLING_WARMUP:-true}
-      - DOCLING_DEFAULT_TOKENIZER=${DOCLING_DEFAULT_TOKENIZER:-}
+      - DOCLING_SERVE_OCRENABLE=${DOCLING_DO_OCR:-true}
+      - DOCLING_SERVE_OCR_ENGINE=${DOCLING_OCR_ENGINE:-easyocr}
+      - DOCLING_SERVE_DOCUMENT_TIMEOUT=${DOCLING_DOCUMENT_TIMEOUT:-300}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 30s
       timeout: 10s
       retries: 10
@@ -174,7 +159,7 @@ services:
         condition: service_healthy
       llama-embed:
         condition: service_healthy
-      docling-api:
+      docling-serve:
         condition: service_healthy
     networks:
       - atlas-network

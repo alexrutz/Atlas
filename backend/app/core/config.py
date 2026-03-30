@@ -91,7 +91,7 @@ class EmbeddingConfig(BaseModel):
 
 
 class DoclingConfig(BaseModel):
-    base_url: str = "http://docling-api:8090"
+    base_url: str = "http://docling-serve:5001"
     max_tokens: int = 512
     merge_peers: bool = True
     tokenizer: str = ""
