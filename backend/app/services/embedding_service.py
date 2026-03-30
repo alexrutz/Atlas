@@ -1,7 +1,12 @@
 """
-Embedding Service - Computes embedding vectors via vLLM.
+Embedding Service - Computes embedding vectors via llama-server.
 
-Uses the OpenAI-compatible /v1/embeddings API from vLLM with GPU acceleration.
+Uses the OpenAI-compatible /v1/embeddings endpoint.
+
+Functions:
+    embed_text(text)       - Embed a single text string
+    embed_batch(texts)     - Embed a list of texts in batches
+    embed_query(query)     - Alias for embed_text (for search queries)
 """
 
 import logging
@@ -13,67 +18,65 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-class EmbeddingService:
-    """Computes embedding vectors for texts via vLLM."""
+async def embed_text(text: str) -> list[float]:
+    """Compute the embedding vector for a single text."""
+    config = settings.embedding
 
-    def __init__(self):
-        self.config = settings.embedding
-        self.base_url = self.config.base_url
+    async with httpx.AsyncClient(timeout=config.timeout) as client:
+        for attempt in range(config.max_retries):
+            try:
+                response = await client.post(
+                    f"{config.base_url}/v1/embeddings",
+                    json={
+                        "input": text,
+                        "model": config.model,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["data"][0]["embedding"]
+            except Exception as e:
+                logger.warning(f"Embedding attempt {attempt + 1} failed: {e}")
+                if attempt == config.max_retries - 1:
+                    raise
 
-    async def embed_text(self, text: str) -> list[float]:
-        """Compute the embedding vector for a single text."""
-        async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-            for attempt in range(self.config.max_retries):
+
+async def embed_batch(texts: list[str]) -> list[list[float]]:
+    """Compute embedding vectors for multiple texts in batches."""
+    config = settings.embedding
+    embeddings = []
+    batch_size = config.batch_size
+
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        logger.info(f"Embedding batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size}")
+
+        async with httpx.AsyncClient(timeout=config.timeout) as client:
+            for attempt in range(config.max_retries):
                 try:
                     response = await client.post(
-                        f"{self.base_url}/v1/embeddings",
+                        f"{config.base_url}/v1/embeddings",
                         json={
-                            "input": text,
-                            "model": self.config.model,
+                            "input": batch,
+                            "model": config.model,
                         },
                     )
                     response.raise_for_status()
                     data = response.json()
-                    return data["data"][0]["embedding"]
+                    batch_embeddings = [item["embedding"] for item in data["data"]]
+                    embeddings.extend(batch_embeddings)
+                    break
                 except Exception as e:
-                    logger.warning(f"Embedding attempt {attempt + 1} failed: {e}")
-                    if attempt == self.config.max_retries - 1:
-                        raise
+                    logger.warning(f"Batch embedding attempt {attempt + 1} failed: {e}")
+                    if attempt == config.max_retries - 1:
+                        # Fallback: embed individually
+                        for text in batch:
+                            emb = await embed_text(text)
+                            embeddings.append(emb)
 
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Compute embedding vectors for multiple texts in batches."""
-        embeddings = []
-        batch_size = self.config.batch_size
+    return embeddings
 
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            logger.info(f"Embedding batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size}")
 
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                for attempt in range(self.config.max_retries):
-                    try:
-                        response = await client.post(
-                            f"{self.base_url}/v1/embeddings",
-                            json={
-                                "input": batch,
-                                "model": self.config.model,
-                            },
-                        )
-                        response.raise_for_status()
-                        data = response.json()
-                        batch_embeddings = [item["embedding"] for item in data["data"]]
-                        embeddings.extend(batch_embeddings)
-                        break
-                    except Exception as e:
-                        logger.warning(f"Batch embedding attempt {attempt + 1} failed: {e}")
-                        if attempt == self.config.max_retries - 1:
-                            # Fallback: embed individually
-                            for text in batch:
-                                emb = await self.embed_text(text)
-                                embeddings.append(emb)
-
-        return embeddings
-
-    async def embed_query(self, query: str) -> list[float]:
-        """Compute the embedding vector for a search query."""
-        return await self.embed_text(query)
+async def embed_query(query: str) -> list[float]:
+    """Compute the embedding vector for a search query."""
+    return await embed_text(query)

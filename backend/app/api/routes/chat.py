@@ -1,4 +1,4 @@
-"""API-Routen: Chat und RAG-Pipeline."""
+"""API routes: Chat and RAG pipeline."""
 
 import json
 import logging
@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
@@ -19,7 +20,19 @@ from app.schemas.chat import (
     ChatRequest, ChatResponse, ConversationResponse,
     MessageResponse, SelectedCollectionsUpdate, SourceChunk,
 )
-from app.services.rag_pipeline import RAGPipeline
+from app.services.rag_pipeline import (
+    run_rag_query,
+    get_allowed_collection_ids,
+    get_selected_collection_ids,
+    save_to_conversation,
+)
+from app.services.retrieval_service import search_chunks
+from app.services.query_enrichment_service import enrich_query
+from app.services.llm_service import (
+    generate_stream,
+    build_rag_prompt,
+    build_document_delivery_prompt,
+)
 from app.services.llm_diagnostic import (
     log_free_chat_call,
     log_free_chat_stream_complete,
@@ -45,7 +58,7 @@ async def list_conversations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Eigene Konversationen auflisten."""
+    """List own conversations."""
     result = await db.execute(
         select(Conversation)
         .where(Conversation.user_id == current_user.id)
@@ -70,7 +83,7 @@ async def create_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Neue Konversation erstellen."""
+    """Create a new conversation."""
     conv = Conversation(user_id=current_user.id, title="Neue Konversation")
     db.add(conv)
     await db.flush()
@@ -84,7 +97,7 @@ async def delete_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Konversation löschen."""
+    """Delete a conversation."""
     result = await db.execute(
         select(Conversation).where(
             Conversation.id == conversation_id,
@@ -103,7 +116,7 @@ async def get_conversation_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Nachrichten einer Konversation laden."""
+    """Load messages of a conversation."""
     result = await db.execute(
         select(Conversation).where(
             Conversation.id == conversation_id,
@@ -185,10 +198,10 @@ async def ask_question(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Frage stellen und Antwort über die RAG-Pipeline erhalten."""
+    """Ask a question and get an answer via the RAG pipeline."""
     try:
-        pipeline = RAGPipeline(db)
-        result = await pipeline.query(
+        result = await run_rag_query(
+            db=db,
             question=request.question,
             user=current_user,
             conversation_id=request.conversation_id,
@@ -200,7 +213,7 @@ async def ask_question(
         )
         return result
     except Exception as e:
-        logger.error(f"RAG-Pipeline Fehler: {e}", exc_info=True)
+        logger.error(f"RAG pipeline error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Fehler bei der Antwortgenerierung: {str(e)}",
@@ -282,14 +295,14 @@ async def ask_question_stream(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Frage stellen mit Streaming-Antwort über Server-Sent Events."""
-    pipeline = RAGPipeline(db)
+    """Ask a question with streaming answer via Server-Sent Events."""
     is_document_delivery = bool(_GIB_MIR_PATTERN.search(request.question))
 
     try:
         # Free chat mode - no retrieval needed (but not for "gib mir")
         if not request.rag_mode and not is_document_delivery:
-            system = pipeline.llm.config.free_chat_system_prompt or pipeline.llm.config.system_prompt
+            llm_config = settings.llm
+            system = llm_config.free_chat_system_prompt or llm_config.system_prompt
 
             async def free_chat_stream():
                 full_answer = ""
@@ -301,7 +314,7 @@ async def ask_question_stream(
                     is_stream_start=True,
                 )
                 try:
-                    async for chunk in pipeline.llm.generate_stream(
+                    async for chunk in generate_stream(
                         request.question,
                         system_prompt=system,
                         enable_thinking=request.enable_thinking,
@@ -320,7 +333,8 @@ async def ask_question_stream(
                         thinking=full_thinking or None,
                     )
 
-                    conv_id = await pipeline._save_to_conversation(
+                    conv_id = await save_to_conversation(
+                        db=db,
                         user=current_user,
                         conversation_id=request.conversation_id,
                         question=request.question,
@@ -334,7 +348,7 @@ async def ask_question_stream(
                     done_data = json.dumps({"type": "done", "conversation_id": conv_id})
                     yield f"data: {done_data}\n\n"
                 except Exception as e:
-                    logger.error(f"Free-Chat Streaming-Fehler: {e}", exc_info=True)
+                    logger.error(f"Free-Chat streaming error: {e}", exc_info=True)
                     error_data = json.dumps({"type": "error", "content": str(e)})
                     yield f"data: {error_data}\n\n"
 
@@ -345,7 +359,7 @@ async def ask_question_stream(
             )
 
         # RAG mode (or document delivery mode)
-        allowed_ids = await pipeline._get_allowed_collection_ids(current_user)
+        allowed_ids = await get_allowed_collection_ids(db, current_user)
         if not allowed_ids:
             async def no_access():
                 data = json.dumps({"type": "error", "content": "Sie haben keinen Zugriff auf Collections."})
@@ -359,7 +373,7 @@ async def ask_question_stream(
         elif request.collection_ids:
             search_ids = [cid for cid in request.collection_ids if cid in allowed_ids]
         else:
-            search_ids = await pipeline._get_selected_collection_ids(current_user, allowed_ids)
+            search_ids = await get_selected_collection_ids(db, current_user, allowed_ids)
 
         if not search_ids:
             async def no_collections():
@@ -369,17 +383,17 @@ async def ask_question_stream(
 
         # Query enrichment
         if request.enable_enrichment:
-            enriched_query = await pipeline.query_enrichment.enrich_query(
-                query=request.question, collection_ids=search_ids,
+            enriched_query = await enrich_query(
+                db=db, query=request.question, collection_ids=search_ids,
                 enable_thinking=request.enable_enrichment_thinking,
             )
         else:
             enriched_query = request.question
 
-        results = await pipeline.retrieval.search(query=enriched_query, collection_ids=search_ids)
+        results = await search_chunks(db=db, query=enriched_query, collection_ids=search_ids)
 
         if not results and enriched_query != request.question:
-            results = await pipeline.retrieval.search(query=request.question, collection_ids=search_ids)
+            results = await search_chunks(db=db, query=request.question, collection_ids=search_ids)
 
         if not results:
             async def no_results():
@@ -411,11 +425,11 @@ async def ask_question_stream(
 
         # Use special document delivery prompt or standard RAG prompt
         if is_document_delivery:
-            prompt = pipeline.llm.build_document_delivery_prompt(
+            prompt = build_document_delivery_prompt(
                 request.question, enriched_query, contexts,
             )
         else:
-            prompt = pipeline.llm.build_rag_prompt(request.question, enriched_query, contexts)
+            prompt = build_rag_prompt(request.question, enriched_query, contexts)
 
         rag_chunks = [
             {
@@ -447,7 +461,7 @@ async def ask_question_stream(
                 yield f"data: {sources_data}\n\n"
 
                 # Streaming answer with thinking
-                async for chunk in pipeline.llm.generate_stream(
+                async for chunk in generate_stream(
                     prompt,
                     enable_thinking=request.enable_thinking,
                 ):
@@ -482,7 +496,8 @@ async def ask_question_stream(
                         full_answer = clean_answer
 
                 # Save conversation
-                conv_id = await pipeline._save_to_conversation(
+                conv_id = await save_to_conversation(
+                    db=db,
                     user=current_user,
                     conversation_id=request.conversation_id,
                     question=request.question,
@@ -510,7 +525,7 @@ async def ask_question_stream(
         )
 
     except Exception as e:
-        logger.error(f"Stream-Setup Fehler: {e}", exc_info=True)
+        logger.error(f"Stream setup error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Fehler bei der Antwortgenerierung: {str(e)}",
@@ -523,7 +538,7 @@ async def update_selected_collections(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Aktive Collections für den aktuellen Benutzer setzen."""
+    """Set active collections for the current user."""
     existing = await db.execute(
         select(UserSelectedCollection).where(UserSelectedCollection.user_id == current_user.id)
     )

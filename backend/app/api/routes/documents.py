@@ -28,7 +28,7 @@ async def process_document_task(document_id: int) -> None:
     from app.models.document import Document
     logger = logging.getLogger(__name__)
     logger.info(f"Starte Hintergrund-Verarbeitung für Dokument {document_id}")
-    from app.services.document_processor import DocumentProcessor
+    from app.services.document_processor import process_document
 
     # Commit "processing" status immediately in its own transaction so
     # polling clients see the status change right away (flush alone is
@@ -49,8 +49,7 @@ async def process_document_task(document_id: int) -> None:
 
     try:
         async with async_session() as db:
-            processor = DocumentProcessor(db)
-            await processor.process(document_id)
+            await process_document(db, document_id)
             await db.commit()
             logger.info(f"Dokument {document_id} erfolgreich verarbeitet")
     except Exception as e:
