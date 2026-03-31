@@ -102,18 +102,11 @@ docling:
 # -----------------------------------------------------------------------------
 # Document Processing (local chunking for text-based formats)
 # Used for TXT, MD, CSV, JSON files that don't need ML parsing.
+# Splits text recursively using paragraph/line/sentence boundaries.
 # -----------------------------------------------------------------------------
 chunking:
-  strategy: "semantic"
   chunk_size: 512
   chunk_overlap: 50
-  min_chunk_size: 100
-  max_chunk_size: 1024
-  separators:
-    - "\n\n"
-    - "\n"
-    - ". "
-    - " "
 
 # -----------------------------------------------------------------------------
 # Retrieval Configuration

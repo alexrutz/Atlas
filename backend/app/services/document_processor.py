@@ -58,12 +58,11 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
             chunks = parsed.chunks
             chunker_type = "docling"
         else:
-            chunker_type = settings.chunking_strategy
-            logger.info(f"Chunking locally with strategy: {chunker_type}")
+            chunker_type = "local"
+            logger.info("Chunking locally (recursive text splitter)")
             chunks = await asyncio.to_thread(
                 chunk_text,
                 text=parsed.text,
-                strategy=settings.chunking_strategy,
                 chunk_size=settings.chunking_chunk_size,
                 overlap=settings.chunking_chunk_overlap,
                 sections=parsed.sections,

@@ -121,12 +121,8 @@ class Settings:
 
         # -- Chunking (local text files) --
         chunk = config.get("chunking", {})
-        self.chunking_strategy: str = chunk.get("strategy", "semantic")
         self.chunking_chunk_size: int = chunk.get("chunk_size", 512)
         self.chunking_chunk_overlap: int = chunk.get("chunk_overlap", 50)
-        self.chunking_min_chunk_size: int = chunk.get("min_chunk_size", 100)
-        self.chunking_max_chunk_size: int = chunk.get("max_chunk_size", 1024)
-        self.chunking_separators: list[str] = chunk.get("separators", ["\n\n", "\n", ". ", " "])
 
         # -- Retrieval --
         ret = config.get("retrieval", {})
