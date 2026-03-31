@@ -1,4 +1,4 @@
-"""ORM model: Users (iam schema)."""
+"""ORM model: Users."""
 
 from datetime import datetime, timezone
 
@@ -10,7 +10,7 @@ from app.core.database import Base
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = {"schema": "iam"}
+    __table_args__ = {}
 
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
@@ -23,5 +23,5 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
-    groups = relationship("Group", secondary="iam.user_groups", back_populates="members")
+    groups = relationship("Group", secondary="user_groups", back_populates="members")
     conversations = relationship("Conversation", back_populates="user")

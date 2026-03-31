@@ -4,8 +4,8 @@ Document Processor - Parsing and chunking of documents.
 Routes documents to docling-serve (PDF, DOCX, XLSX, PPTX, HTML, XML, images)
 or handles simple formats locally (TXT, MD, CSV, JSON).
 
-Chunks are stored in rag.chunks, embeddings in rag.chunk_embeddings.
-Document-level metadata (stats, parse timings) stored in content.documents.metadata.
+Chunks are stored in the chunks table, embeddings in chunk_embeddings.
+Document-level metadata (stats, parse timings) stored in documents.metadata.
 
 Functions:
     process_document(db, document_id) - Full processing pipeline for one document

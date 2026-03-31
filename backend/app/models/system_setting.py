@@ -1,4 +1,4 @@
-"""ORM model: System-wide settings key-value store (config schema)."""
+"""ORM model: System-wide settings key-value store."""
 
 from datetime import datetime, timezone
 
@@ -10,7 +10,7 @@ from app.core.database import Base
 
 class SystemSetting(Base):
     __tablename__ = "system_settings"
-    __table_args__ = {"schema": "config"}
+    __table_args__ = {}
 
     key: Mapped[str] = mapped_column(String(200), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
@@ -23,9 +23,6 @@ logger = logging.getLogger(__name__)
 
 # Initialize diagnostic logging for LLM calls
 setup_diagnostic_logging()
-
-# PostgreSQL schemas used by the application
-DB_SCHEMAS = ["iam", "content", "rag", "chat", "config"]
 
 
 async def load_prompt_overrides():
@@ -79,16 +76,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"Embedding: {settings.embedding_model} @ {settings.embedding_base_url}")
     logger.info(f"Docling Serve: {settings.docling_base_url}")
 
-    # Create schemas and tables
-    # Advisory lock serialises parallel workers so only one creates the tables.
+    # Create all tables in the default (public) schema
     async with engine.begin() as conn:
-        await conn.execute(text("SELECT pg_advisory_xact_lock(20250320)"))
-
-        # Ensure all schemas exist
-        for schema in DB_SCHEMAS:
-            await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
-
-        # Create all tables within their respective schemas
         await conn.run_sync(Base.metadata.create_all)
 
     # Seed admin user
