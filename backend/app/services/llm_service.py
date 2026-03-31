@@ -70,6 +70,7 @@ async def generate(
         "model": settings.llm_model,
         "messages": messages,
         **_sampling_params(enable_thinking),
+        "chat_template_kwargs": {"enable_thinking": enable_thinking}
         "max_tokens": settings.llm_max_tokens,
         "stream": False,
     }
@@ -129,6 +130,7 @@ async def generate_stream(
         "model": settings.llm_model,
         "messages": messages,
         **_sampling_params(enable_thinking),
+        "chat_template_kwargs": {"enable_thinking": enable_thinking}
         "max_tokens": settings.llm_max_tokens,
         "stream": True,
     }
