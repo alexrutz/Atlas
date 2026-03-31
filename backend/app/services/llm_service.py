@@ -42,6 +42,10 @@ from app.services.llm_diagnostic import (
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Sampling parameters
+# =============================================================================
+
 def _sampling_params(enable_thinking: bool) -> dict:
     """
     Return sampling parameters based on thinking mode.
@@ -69,6 +73,39 @@ def _sampling_params(enable_thinking: bool) -> dict:
         }
 
 
+def _build_request_body(
+    system_prompt: str,
+    user_prompt: str,
+    enable_thinking: bool,
+    stream: bool,
+    max_tokens: int | None = None,
+    temperature_override: float | None = None,
+) -> dict:
+    """
+    Build the JSON request body for the /v1/chat/completions endpoint.
+    This is shared between generate(), generate_stream(), and generate_enrichment().
+    """
+    sampling = _sampling_params(enable_thinking)
+    if temperature_override is not None:
+        sampling["temperature"] = temperature_override
+
+    return {
+        "model": settings.llm_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        **sampling,
+        "chat_template_kwargs": {"enable_thinking": enable_thinking},
+        "max_tokens": max_tokens or settings.llm_max_tokens,
+        "stream": stream,
+    }
+
+
+# =============================================================================
+# LLM generation functions
+# =============================================================================
+
 async def generate(
     prompt: str,
     system_prompt: str | None = None,
@@ -78,22 +115,11 @@ async def generate(
     Generate a complete response (non-streaming).
 
     Returns:
-        Dict with 'content' and optional 'thinking'
+        Dict with 'content' (the answer) and 'thinking' (reasoning, may be empty)
     """
     system = system_prompt or settings.llm_system_prompt
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": prompt},
-    ]
+    body = _build_request_body(system, prompt, enable_thinking, stream=False)
 
-    body: dict = {
-        "model": settings.llm_model,
-        "messages": messages,
-        **_sampling_params(enable_thinking),
-        "chat_template_kwargs": {"enable_thinking": enable_thinking},
-        "max_tokens": settings.llm_max_tokens,
-        "stream": False,
-    }
     logger.info(f"generate: enable_thinking={enable_thinking}")
 
     try:
@@ -111,20 +137,15 @@ async def generate(
             }
 
             log_rag_call(
-                system_prompt=system,
-                user_prompt=prompt,
+                system_prompt=system, user_prompt=prompt,
                 enable_thinking=enable_thinking,
-                output=result["content"],
-                thinking=result["thinking"] or None,
+                output=result["content"], thinking=result["thinking"] or None,
             )
-
             return result
     except Exception as e:
         log_rag_call(
-            system_prompt=system,
-            user_prompt=prompt,
-            enable_thinking=enable_thinking,
-            error=str(e),
+            system_prompt=system, user_prompt=prompt,
+            enable_thinking=enable_thinking, error=str(e),
         )
         raise
 
@@ -135,32 +156,19 @@ async def generate_stream(
     enable_thinking: bool = False,
 ) -> AsyncGenerator[dict, None]:
     """
-    Generate a response as a stream.
+    Generate a response as a stream of tokens.
 
-    Yields:
-        Dicts with 'type' ('thinking' or 'content') and 'text'
+    Yields dicts with:
+      - {"type": "thinking", "text": "..."} for reasoning tokens
+      - {"type": "content", "text": "..."} for answer tokens
     """
     system = system_prompt or settings.llm_system_prompt
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": prompt},
-    ]
+    body = _build_request_body(system, prompt, enable_thinking, stream=True)
 
-    body: dict = {
-        "model": settings.llm_model,
-        "messages": messages,
-        **_sampling_params(enable_thinking),
-        "chat_template_kwargs": {"enable_thinking": enable_thinking},
-        "max_tokens": settings.llm_max_tokens,
-        "stream": True,
-    }
     logger.info(f"generate_stream: enable_thinking={enable_thinking}")
-
     log_rag_call(
-        system_prompt=system,
-        user_prompt=prompt,
-        enable_thinking=enable_thinking,
-        is_stream_start=True,
+        system_prompt=system, user_prompt=prompt,
+        enable_thinking=enable_thinking, is_stream_start=True,
     )
 
     timeout = httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0)
@@ -171,6 +179,8 @@ async def generate_stream(
             json=body,
         ) as response:
             response.raise_for_status()
+
+            # The LLM server sends lines like: "data: {json...}" or "data: [DONE]"
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -180,10 +190,8 @@ async def generate_stream(
                 try:
                     chunk = json.loads(payload)
                     delta = chunk["choices"][0].get("delta", {})
-                    # Thinking content (reasoning)
                     if delta.get("reasoning_content"):
                         yield {"type": "thinking", "text": delta["reasoning_content"]}
-                    # Regular content
                     if delta.get("content"):
                         yield {"type": "content", "text": delta["content"]}
                 except (json.JSONDecodeError, KeyError, IndexError):
@@ -196,22 +204,10 @@ async def generate_enrichment(prompt: str, enable_thinking: bool = False) -> str
     Uses temperature=0 for deterministic output (we want consistent rephrasing).
     """
     system = settings.llm_enrichment_system_prompt or settings.llm_system_prompt
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": prompt},
-    ]
-
-    sampling = _sampling_params(enable_thinking)
-    sampling["temperature"] = 0.0
-
-    body: dict = {
-        "model": settings.llm_model,
-        "messages": messages,
-        **sampling,
-        "chat_template_kwargs": {"enable_thinking": enable_thinking},
-        "max_tokens": 4096,
-        "stream": False,
-    }
+    body = _build_request_body(
+        system, prompt, enable_thinking, stream=False,
+        max_tokens=4096, temperature_override=0.0,
+    )
 
     try:
         async with httpx.AsyncClient(timeout=settings.llm_timeout) as client:
@@ -223,21 +219,76 @@ async def generate_enrichment(prompt: str, enable_thinking: bool = False) -> str
             data = response.json()
             result = data["choices"][0]["message"].get("content", "").strip()
 
-            log_enrichment_call(
-                system_prompt=system,
-                user_prompt=prompt,
-                output=result,
-            )
-
+            log_enrichment_call(system_prompt=system, user_prompt=prompt, output=result)
             return result
     except Exception as e:
-        log_enrichment_call(
-            system_prompt=system,
-            user_prompt=prompt,
-            output="",
-            error=str(e),
-        )
+        log_enrichment_call(system_prompt=system, user_prompt=prompt, output="", error=str(e))
         raise
+
+
+# =============================================================================
+# Prompt builders
+# =============================================================================
+
+def _format_contexts(contexts: list[dict], include_document_id: bool = False) -> str:
+    """
+    Format retrieval results as a text block for the LLM prompt.
+
+    Each context becomes:
+      [Source 1: document_name.pdf, page 5]
+      The actual chunk content here...
+
+    Contexts are separated by "---" dividers.
+    """
+    parts = []
+    for i, ctx in enumerate(contexts, 1):
+        source_info = f"[Source {i}: {ctx['document_name']}"
+        if ctx.get("page_number"):
+            source_info += f", page {ctx['page_number']}"
+        if include_document_id:
+            source_info += f", document_id={ctx.get('document_id', 'unknown')}"
+        source_info += "]"
+        parts.append(f"{source_info}\n{ctx['content']}")
+    return "\n\n---\n\n".join(parts)
+
+
+def build_rag_prompt(
+    original_question: str,
+    enriched_question: str,
+    contexts: list[dict],
+) -> str:
+    """Build the RAG prompt from original question, enriched question and contexts."""
+    context_text = _format_contexts(contexts)
+
+    if enriched_question != original_question:
+        question_block = (
+            f"ORIGINAL QUESTION (user terminology): {original_question}\n"
+            f"ENRICHED QUESTION (search terms): {enriched_question}"
+        )
+        instruction = (
+            "Based on the following document excerpts, answer the question.\n"
+            "The ENRICHED QUESTION contains resolved technical terms - use them to "
+            "find the relevant information in the documents.\n"
+            "Formulate your answer using the terminology from the ORIGINAL QUESTION.\n"
+            "Cite the sources in your answer with [Source X].\n"
+            "If the information is insufficient, say so honestly."
+        )
+    else:
+        question_block = f"QUESTION: {original_question}"
+        instruction = (
+            "Based on the following document excerpts, answer the question.\n"
+            "Cite the sources in your answer with [Source X].\n"
+            "If the information is insufficient, say so honestly."
+        )
+
+    return f"""{instruction}
+
+DOCUMENTS:
+{context_text}
+
+{question_block}
+
+ANSWER:"""
 
 
 def build_document_delivery_prompt(
@@ -245,17 +296,8 @@ def build_document_delivery_prompt(
     enriched_question: str,
     contexts: list[dict],
 ) -> str:
-    """Build a prompt for the document delivery agent."""
-    context_parts = []
-    for i, ctx in enumerate(contexts, 1):
-        source_info = f"[Source {i}: {ctx['document_name']}"
-        if ctx.get("page_number"):
-            source_info += f", page {ctx['page_number']}"
-        source_info += f", document_id={ctx.get('document_id', 'unknown')}"
-        source_info += "]"
-        context_parts.append(f"{source_info}\n{ctx['content']}")
-
-    context_text = "\n\n---\n\n".join(context_parts)
+    """Build a prompt for the document delivery agent ("gib mir" requests)."""
+    context_text = _format_contexts(contexts, include_document_id=True)
 
     if enriched_question != original_question:
         question_block = (
@@ -282,53 +324,6 @@ IMPORTANT:
 - Pick only ONE document - the single best match.
 - If multiple chunks come from the same document, that's a strong signal it's the right one.
 - If you cannot find a relevant document, respond normally without the tool call block.
-
-DOCUMENTS:
-{context_text}
-
-{question_block}
-
-ANSWER:"""
-
-
-def build_rag_prompt(
-    original_question: str,
-    enriched_question: str,
-    contexts: list[dict],
-) -> str:
-    """Build the RAG prompt from original question, enriched question and contexts."""
-    context_parts = []
-    for i, ctx in enumerate(contexts, 1):
-        source_info = f"[Source {i}: {ctx['document_name']}"
-        if ctx.get("page_number"):
-            source_info += f", page {ctx['page_number']}"
-        source_info += "]"
-        context_parts.append(f"{source_info}\n{ctx['content']}")
-
-    context_text = "\n\n---\n\n".join(context_parts)
-
-    if enriched_question != original_question:
-        question_block = (
-            f"ORIGINAL QUESTION (user terminology): {original_question}\n"
-            f"ENRICHED QUESTION (search terms): {enriched_question}"
-        )
-        instruction = (
-            "Based on the following document excerpts, answer the question.\n"
-            "The ENRICHED QUESTION contains resolved technical terms - use them to "
-            "find the relevant information in the documents.\n"
-            "Formulate your answer using the terminology from the ORIGINAL QUESTION.\n"
-            "Cite the sources in your answer with [Source X].\n"
-            "If the information is insufficient, say so honestly."
-        )
-    else:
-        question_block = f"QUESTION: {original_question}"
-        instruction = (
-            "Based on the following document excerpts, answer the question.\n"
-            "Cite the sources in your answer with [Source X].\n"
-            "If the information is insufficient, say so honestly."
-        )
-
-    return f"""{instruction}
 
 DOCUMENTS:
 {context_text}
