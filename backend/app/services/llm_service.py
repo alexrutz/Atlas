@@ -185,7 +185,8 @@ async def generate_enrichment(prompt: str, enable_thinking: bool = False) -> str
         "model": settings.llm_model,
         "messages": messages,
         **sampling,
-        "max_tokens": 256,
+        "chat_template_kwargs": {"enable_thinking": enable_thinking},
+        "max_tokens": 4096,
         "stream": False,
     }
 
