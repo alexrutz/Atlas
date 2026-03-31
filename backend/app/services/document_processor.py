@@ -58,14 +58,14 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
             chunks = parsed.chunks
             chunker_type = "docling"
         else:
-            chunker_type = settings.chunking.strategy
+            chunker_type = settings.chunking_strategy
             logger.info(f"Chunking locally with strategy: {chunker_type}")
             chunks = await asyncio.to_thread(
                 chunk_text,
                 text=parsed.text,
-                strategy=settings.chunking.strategy,
-                chunk_size=settings.chunking.chunk_size,
-                overlap=settings.chunking.chunk_overlap,
+                strategy=settings.chunking_strategy,
+                chunk_size=settings.chunking_chunk_size,
+                overlap=settings.chunking_chunk_overlap,
                 sections=parsed.sections,
             )
 
@@ -111,7 +111,7 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
         for chunk_obj, embedding in zip(chunk_objects, embeddings):
             emb_obj = ChunkEmbedding(
                 chunk_id=chunk_obj.id,
-                model_name=settings.embedding.model,
+                model_name=settings.embedding_model,
                 embedding=embedding,
             )
             db.add(emb_obj)

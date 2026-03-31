@@ -20,16 +20,14 @@ logger = logging.getLogger(__name__)
 
 async def embed_text(text: str) -> list[float]:
     """Compute the embedding vector for a single text."""
-    config = settings.embedding
-
-    async with httpx.AsyncClient(timeout=config.timeout) as client:
-        for attempt in range(config.max_retries):
+    async with httpx.AsyncClient(timeout=settings.embedding_timeout) as client:
+        for attempt in range(settings.embedding_max_retries):
             try:
                 response = await client.post(
-                    f"{config.base_url}/v1/embeddings",
+                    f"{settings.embedding_base_url}/v1/embeddings",
                     json={
                         "input": text,
-                        "model": config.model,
+                        "model": settings.embedding_model,
                     },
                 )
                 response.raise_for_status()
@@ -37,28 +35,27 @@ async def embed_text(text: str) -> list[float]:
                 return data["data"][0]["embedding"]
             except Exception as e:
                 logger.warning(f"Embedding attempt {attempt + 1} failed: {e}")
-                if attempt == config.max_retries - 1:
+                if attempt == settings.embedding_max_retries - 1:
                     raise
 
 
 async def embed_batch(texts: list[str]) -> list[list[float]]:
     """Compute embedding vectors for multiple texts in batches."""
-    config = settings.embedding
     embeddings = []
-    batch_size = config.batch_size
+    batch_size = settings.embedding_batch_size
 
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
         logger.info(f"Embedding batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size}")
 
-        async with httpx.AsyncClient(timeout=config.timeout) as client:
-            for attempt in range(config.max_retries):
+        async with httpx.AsyncClient(timeout=settings.embedding_timeout) as client:
+            for attempt in range(settings.embedding_max_retries):
                 try:
                     response = await client.post(
-                        f"{config.base_url}/v1/embeddings",
+                        f"{settings.embedding_base_url}/v1/embeddings",
                         json={
                             "input": batch,
-                            "model": config.model,
+                            "model": settings.embedding_model,
                         },
                     )
                     response.raise_for_status()
@@ -68,7 +65,7 @@ async def embed_batch(texts: list[str]) -> list[list[float]]:
                     break
                 except Exception as e:
                     logger.warning(f"Batch embedding attempt {attempt + 1} failed: {e}")
-                    if attempt == config.max_retries - 1:
+                    if attempt == settings.embedding_max_retries - 1:
                         # Fallback: embed individually
                         for text in batch:
                             emb = await embed_text(text)

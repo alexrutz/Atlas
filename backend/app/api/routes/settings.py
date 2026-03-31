@@ -118,7 +118,7 @@ async def get_prompts(
         if setting:
             prompts[key] = setting.value
         else:
-            prompts[key] = getattr(settings.llm, key, "")
+            prompts[key] = getattr(settings, f"llm_{key}", "")
     return PromptsResponse(**prompts)
 
 
@@ -148,6 +148,6 @@ async def update_prompts(
             db.add(SystemSetting(key=db_key, value=value))
 
         # Update in-memory config so changes take effect immediately
-        setattr(settings.llm, key, value)
+        setattr(settings, f"llm_{key}", value)
 
     return PromptsResponse(**updates)

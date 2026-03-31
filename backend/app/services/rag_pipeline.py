@@ -141,8 +141,7 @@ async def run_free_chat(
     enable_thinking: bool,
 ) -> ChatResponse:
     """Direct conversation without RAG context."""
-    config = settings.llm
-    system = config.free_chat_system_prompt or config.system_prompt
+    system = settings.llm_free_chat_system_prompt or settings.llm_system_prompt
     result = await generate(question, system_prompt=system, enable_thinking=enable_thinking)
 
     conv_id = await save_to_conversation(

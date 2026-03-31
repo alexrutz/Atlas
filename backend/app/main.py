@@ -40,7 +40,7 @@ async def load_prompt_overrides():
             )
             setting = result.scalar_one_or_none()
             if setting and setting.value:
-                setattr(settings.llm, key, setting.value)
+                setattr(settings, f"llm_{key}", setting.value)
                 logger.info(f"Loaded prompt override for '{key}' from database.")
 
 
@@ -52,9 +52,9 @@ async def seed_admin_user():
         stmt = (
             pg_insert(User)
             .values(
-                username=settings.auth.default_admin_username,
-                email=f"{settings.auth.default_admin_username}@atlas.local",
-                hashed_password=hash_password(settings.auth.default_admin_password),
+                username=settings.auth_default_admin_username,
+                email=f"{settings.auth_default_admin_username}@atlas.local",
+                hashed_password=hash_password(settings.auth_default_admin_password),
                 full_name="Administrator",
                 is_admin=True,
                 is_active=True,
@@ -65,7 +65,7 @@ async def seed_admin_user():
         result = await session.execute(stmt)
         await session.commit()
         if result.fetchone():
-            logger.info(f"Admin user '{settings.auth.default_admin_username}' created.")
+            logger.info(f"Admin user '{settings.auth_default_admin_username}' created.")
         else:
             logger.info("Admin user already exists.")
 
@@ -75,9 +75,9 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
     # --- Startup ---
     logger.info("Atlas RAG System starting...")
-    logger.info(f"LLM: {settings.llm.model} @ {settings.llm.base_url}")
-    logger.info(f"Embedding: {settings.embedding.model} @ {settings.embedding.base_url}")
-    logger.info(f"Docling Serve: {settings.docling.base_url}")
+    logger.info(f"LLM: {settings.llm_model} @ {settings.llm_base_url}")
+    logger.info(f"Embedding: {settings.embedding_model} @ {settings.embedding_base_url}")
+    logger.info(f"Docling Serve: {settings.docling_base_url}")
 
     # Create schemas and tables
     # Advisory lock serialises parallel workers so only one creates the tables.
@@ -114,7 +114,7 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.server.cors_origins,
+    allow_origins=settings.server_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

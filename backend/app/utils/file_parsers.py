@@ -109,8 +109,7 @@ def _parse_with_docling_serve(file_path: str, file_type: str) -> ParsedDocument:
     """
     from app.core.config import settings
 
-    cfg = settings.docling
-    url = f"{cfg.base_url}/v1/chunk/hybrid/file"
+    url = f"{settings.docling_base_url}/v1/chunk/hybrid/file"
 
     path = Path(file_path)
     if not path.exists():
@@ -123,10 +122,10 @@ def _parse_with_docling_serve(file_path: str, file_type: str) -> ParsedDocument:
     # - "files" is the uploaded file
     # - "chunking_*" fields control the HybridChunker
     # - "include_converted_doc" gives us the full markdown text too
-    tokenizer = cfg.tokenizer or "bert-base-uncased"
+    tokenizer = settings.docling_tokenizer or "bert-base-uncased"
     form_data = {
-        "chunking_max_tokens": str(cfg.max_tokens),
-        "chunking_merge_peers": str(cfg.merge_peers).lower(),
+        "chunking_max_tokens": str(settings.docling_max_tokens),
+        "chunking_merge_peers": str(settings.docling_merge_peers).lower(),
         "chunking_tokenizer": tokenizer,
         "include_converted_doc": "true",
     }
@@ -237,7 +236,7 @@ def _parse_with_docling_serve(file_path: str, file_type: str) -> ParsedDocument:
             "file_size_bytes": len(file_bytes),
             "total_time_s": round(processing_time, 2),
             "tokenizer": tokenizer,
-            "max_tokens": cfg.max_tokens,
+            "max_tokens": settings.docling_max_tokens,
         },
         chunks=chunks,
         stats=stats,

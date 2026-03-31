@@ -23,8 +23,8 @@ async def get_current_user(
     try:
         payload = jwt.decode(
             credentials.credentials,
-            settings.auth.secret_key,
-            algorithms=[settings.auth.algorithm],
+            settings.auth_secret_key,
+            algorithms=[settings.auth_algorithm],
         )
         if payload.get("type") != "access":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Ungültiger Token-Typ")

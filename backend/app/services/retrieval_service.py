@@ -36,7 +36,7 @@ def _get_ranker():
         try:
             from flashrank import Ranker
 
-            model = settings.retrieval.rerank_model
+            model = settings.retrieval_rerank_model
             logger.info(f"Loading FlashRank cross-encoder: {model}")
             _ranker = Ranker(model_name=model, cache_dir="/tmp/flashrank")
             logger.info("FlashRank cross-encoder loaded successfully")
@@ -106,8 +106,7 @@ async def search_chunks(
     Returns:
         List of RetrievalResult, sorted by relevance
     """
-    config = settings.retrieval
-    top_k = top_k or config.top_k
+    top_k = top_k or settings.retrieval_top_k
 
     if not collection_ids:
         return []
@@ -119,7 +118,7 @@ async def search_chunks(
     results = await vector_search(db, query_embedding, collection_ids, top_k)
 
     # Post-query threshold filter
-    threshold = config.similarity_threshold
+    threshold = settings.retrieval_similarity_threshold
     if threshold > 0 and results:
         before = len(results)
         results = [r for r in results if r.similarity_score >= threshold]
@@ -134,9 +133,9 @@ async def search_chunks(
         logger.warning(f"Retrieval: 0 results for query='{query[:100]}'")
 
     # Optional reranking
-    if config.rerank and len(results) > config.rerank_top_k:
+    if settings.retrieval_rerank and len(results) > settings.retrieval_rerank_top_k:
         results = rerank(query, results)
-        results = results[:config.rerank_top_k]
+        results = results[:settings.retrieval_rerank_top_k]
 
     return results
 
@@ -167,7 +166,7 @@ async def vector_search(
 
     result = await db.execute(sql, {
         "collection_ids": collection_ids,
-        "model_name": settings.embedding.model,
+        "model_name": settings.embedding_model,
         "top_k": top_k,
     })
 

@@ -301,8 +301,7 @@ async def ask_question_stream(
     try:
         # Free chat mode - no retrieval needed (but not for "gib mir")
         if not request.rag_mode and not is_document_delivery:
-            llm_config = settings.llm
-            system = llm_config.free_chat_system_prompt or llm_config.system_prompt
+            system = settings.llm_free_chat_system_prompt or settings.llm_system_prompt
 
             async def free_chat_stream():
                 full_answer = ""

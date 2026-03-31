@@ -74,8 +74,7 @@ async def _load_context(db: AsyncSession, collection_ids: list[int]) -> str:
 
 async def _generate_enriched_query(query: str, context: str, enable_thinking: bool = False) -> str:
     """Ask the LLM to enrich the query using the loaded context."""
-    config = settings.retrieval.query_enrichment
-    prompt = config.prompt_template.format(
+    prompt = settings.enrichment_prompt_template.format(
         context=context,
         query=query,
     )

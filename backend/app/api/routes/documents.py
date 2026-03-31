@@ -102,14 +102,14 @@ async def upload_document(
 
     # Prüfe Dateiformat
     suffix = Path(file.filename).suffix.lower()
-    if suffix not in settings.documents.supported_formats:
+    if suffix not in settings.documents_supported_formats:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Dateiformat {suffix} wird nicht unterstützt. Erlaubt: {settings.documents.supported_formats}",
+            detail=f"Dateiformat {suffix} wird nicht unterstützt. Erlaubt: {settings.documents_supported_formats}",
         )
 
     # Datei speichern
-    upload_dir = Path(settings.documents.temp_upload_dir)
+    upload_dir = Path(settings.documents_temp_upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid.uuid4().hex}{suffix}"
     file_path = upload_dir / filename
@@ -117,10 +117,10 @@ async def upload_document(
     content = await file.read()
 
     # Prüfe Dateigröße
-    if len(content) > settings.documents.max_file_size_mb * 1024 * 1024:
+    if len(content) > settings.documents_max_file_size_mb * 1024 * 1024:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Datei zu groß. Maximum: {settings.documents.max_file_size_mb} MB",
+            detail=f"Datei zu groß. Maximum: {settings.documents_max_file_size_mb} MB",
         )
 
     with open(file_path, "wb") as f:

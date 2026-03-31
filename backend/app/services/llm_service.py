@@ -29,16 +29,24 @@ logger = logging.getLogger(__name__)
 
 def _sampling_params(enable_thinking: bool) -> dict:
     """Return sampling parameters based on thinking mode."""
-    config = settings.llm
-    s = config.thinking_sampling if enable_thinking else config.sampling
-    return {
-        "temperature": s.temperature,
-        "top_p": s.top_p,
-        "top_k": s.top_k,
-        "min_p": s.min_p,
-        "presence_penalty": s.presence_penalty,
-        "repeat_penalty": s.repetition_penalty,
-    }
+    if enable_thinking:
+        return {
+            "temperature": settings.llm_thinking_temperature,
+            "top_p": settings.llm_thinking_top_p,
+            "top_k": settings.llm_thinking_top_k,
+            "min_p": settings.llm_thinking_min_p,
+            "presence_penalty": settings.llm_thinking_presence_penalty,
+            "repeat_penalty": settings.llm_thinking_repetition_penalty,
+        }
+    else:
+        return {
+            "temperature": settings.llm_temperature,
+            "top_p": settings.llm_top_p,
+            "top_k": settings.llm_top_k,
+            "min_p": settings.llm_min_p,
+            "presence_penalty": settings.llm_presence_penalty,
+            "repeat_penalty": settings.llm_repetition_penalty,
+        }
 
 
 async def generate(
@@ -52,18 +60,17 @@ async def generate(
     Returns:
         Dict with 'content' and optional 'thinking'
     """
-    config = settings.llm
-    system = system_prompt or config.system_prompt
+    system = system_prompt or settings.llm_system_prompt
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": prompt},
     ]
 
     body: dict = {
-        "model": config.model,
+        "model": settings.llm_model,
         "messages": messages,
         **_sampling_params(enable_thinking),
-        "max_tokens": config.max_tokens,
+        "max_tokens": settings.llm_max_tokens,
         "stream": False,
     }
     logger.info(f"generate: enable_thinking={enable_thinking}")
@@ -71,7 +78,7 @@ async def generate(
     try:
         async with httpx.AsyncClient(timeout=600.0) as client:
             response = await client.post(
-                f"{config.base_url}/v1/chat/completions",
+                f"{settings.llm_base_url}/v1/chat/completions",
                 json=body,
             )
             response.raise_for_status()
@@ -112,18 +119,17 @@ async def generate_stream(
     Yields:
         Dicts with 'type' ('thinking' or 'content') and 'text'
     """
-    config = settings.llm
-    system = system_prompt or config.system_prompt
+    system = system_prompt or settings.llm_system_prompt
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": prompt},
     ]
 
     body: dict = {
-        "model": config.model,
+        "model": settings.llm_model,
         "messages": messages,
         **_sampling_params(enable_thinking),
-        "max_tokens": config.max_tokens,
+        "max_tokens": settings.llm_max_tokens,
         "stream": True,
     }
     logger.info(f"generate_stream: enable_thinking={enable_thinking}")
@@ -139,7 +145,7 @@ async def generate_stream(
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream(
             "POST",
-            f"{config.base_url}/v1/chat/completions",
+            f"{settings.llm_base_url}/v1/chat/completions",
             json=body,
         ) as response:
             response.raise_for_status()
@@ -164,8 +170,7 @@ async def generate_stream(
 
 async def generate_enrichment(prompt: str, enable_thinking: bool = False) -> str:
     """Generate enriched query using the enrichment system prompt."""
-    config = settings.llm
-    system = config.enrichment_system_prompt or config.system_prompt
+    system = settings.llm_enrichment_system_prompt or settings.llm_system_prompt
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": prompt},
@@ -175,7 +180,7 @@ async def generate_enrichment(prompt: str, enable_thinking: bool = False) -> str
     sampling["temperature"] = 0.0
 
     body: dict = {
-        "model": config.model,
+        "model": settings.llm_model,
         "messages": messages,
         **sampling,
         "max_tokens": 256,
@@ -183,9 +188,9 @@ async def generate_enrichment(prompt: str, enable_thinking: bool = False) -> str
     }
 
     try:
-        async with httpx.AsyncClient(timeout=config.timeout) as client:
+        async with httpx.AsyncClient(timeout=settings.llm_timeout) as client:
             response = await client.post(
-                f"{config.base_url}/v1/chat/completions",
+                f"{settings.llm_base_url}/v1/chat/completions",
                 json=body,
             )
             response.raise_for_status()
