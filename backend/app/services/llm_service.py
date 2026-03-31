@@ -1,14 +1,29 @@
 """
-LLM Service - Communication with llama-server via the OpenAI-compatible API.
+LLM Service - Communication with llama-server (the local LLM).
 
-Supports streaming, thinking mode (reasoning), and different system prompts.
+This is the interface to the language model. All LLM calls go through here.
+
+How it works:
+  - llama-server runs locally and exposes an OpenAI-compatible API
+  - We send HTTP requests to /v1/chat/completions (same format as OpenAI)
+  - The LLM generates text based on a system prompt + user prompt
+
+Key concepts:
+  - Thinking mode: The LLM can show its reasoning process ("thinking")
+    before giving the final answer. Uses different sampling parameters
+    (higher temperature for more creative reasoning).
+  - Streaming: Instead of waiting for the full response, we get tokens
+    one at a time via Server-Sent Events (SSE). This lets the frontend
+    show the answer as it's being generated.
+  - Sampling parameters: Control how "creative" vs "focused" the LLM is.
+    Temperature, top_p, top_k etc. affect randomness in token selection.
 
 Functions:
-    generate(prompt, system_prompt, enable_thinking)       - Non-streaming response
-    generate_stream(prompt, system_prompt, enable_thinking) - Streaming response
-    generate_enrichment(prompt, enable_thinking)            - Enrichment call
-    build_rag_prompt(original_q, enriched_q, contexts)     - Build RAG prompt
-    build_document_delivery_prompt(original_q, enriched_q, contexts) - Build delivery prompt
+    generate(prompt, system_prompt, enable_thinking)       - Get full response at once
+    generate_stream(prompt, system_prompt, enable_thinking) - Get response token by token
+    generate_enrichment(prompt, enable_thinking)            - Special call for query enrichment
+    build_rag_prompt(original_q, enriched_q, contexts)     - Build prompt with document context
+    build_document_delivery_prompt(...)                     - Build prompt for "gib mir" requests
 """
 
 import json
@@ -28,7 +43,12 @@ logger = logging.getLogger(__name__)
 
 
 def _sampling_params(enable_thinking: bool) -> dict:
-    """Return sampling parameters based on thinking mode."""
+    """
+    Return sampling parameters based on thinking mode.
+
+    Thinking mode uses higher temperature (more creative/exploratory reasoning).
+    Non-thinking mode uses lower temperature (more focused/deterministic answers).
+    """
     if enable_thinking:
         return {
             "temperature": settings.llm_thinking_temperature,
@@ -171,7 +191,10 @@ async def generate_stream(
 
 
 async def generate_enrichment(prompt: str, enable_thinking: bool = False) -> str:
-    """Generate enriched query using the enrichment system prompt."""
+    """
+    Generate an enriched query using the enrichment system prompt.
+    Uses temperature=0 for deterministic output (we want consistent rephrasing).
+    """
     system = settings.llm_enrichment_system_prompt or settings.llm_system_prompt
     messages = [
         {"role": "system", "content": system},

@@ -1,4 +1,12 @@
-"""API-Routen: Authentifizierung."""
+"""
+API routes: Authentication (login, token refresh, password change).
+
+Authentication flow:
+  1. POST /api/auth/login → sends username + password, gets access + refresh tokens
+  2. Frontend stores the tokens and sends the access token with every request
+  3. When the access token expires, POST /api/auth/refresh with the refresh token
+  4. GET /api/auth/me → returns info about the currently logged-in user
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession

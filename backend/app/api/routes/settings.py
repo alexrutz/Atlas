@@ -1,4 +1,15 @@
-"""API-Routen: Systemeinstellungen."""
+"""
+API routes: System settings (global context, prompts, model info).
+
+Global context:
+  A text that describes the company/domain. This context is given to the LLM
+  during query enrichment so it can rephrase queries with domain-specific terms.
+
+Prompts:
+  The system prompts used for the LLM. Admins can override these via the UI.
+  Overrides are stored in the system_settings table and loaded at startup.
+  Changes take effect immediately (updated in memory + saved to DB).
+"""
 
 import logging
 from pathlib import Path

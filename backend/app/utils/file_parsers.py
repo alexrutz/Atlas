@@ -1,9 +1,18 @@
 """
-Document parsers - routes documents to docling-serve or local text parsers.
+Document parsers - extracts text from uploaded files.
 
-Supported formats:
-- Docling Serve: PDF, DOCX, XLSX, PPTX, HTML, XML, images (ML-powered parsing + chunking)
-- Local: TXT, MD, CSV, JSON (simple text extraction, no ML needed)
+Two parsing paths:
+  1. Docling Serve (for complex formats: PDF, DOCX, XLSX, PPTX, HTML, XML, images)
+     - Runs in a separate Docker container with ML models
+     - Does layout analysis, table recognition, OCR for images
+     - Returns both the full markdown text AND pre-made chunks
+     - Chunks include heading context (e.g. "Chapter 3 > Section 3.1 > ...")
+
+  2. Local parsing (for simple formats: TXT, MD, CSV, JSON)
+     - Just reads the file as text, no ML needed
+     - Chunking is done separately by text_processing.py
+
+The parse_document() function automatically picks the right parser based on file type.
 """
 
 import csv
@@ -118,10 +127,11 @@ def _parse_with_docling_serve(file_path: str, file_type: str) -> ParsedDocument:
     with open(path, "rb") as f:
         file_bytes = f.read()
 
-    # Build the multipart form data:
-    # - "files" is the uploaded file
-    # - "chunking_*" fields control the HybridChunker
-    # - "include_converted_doc" gives us the full markdown text too
+    # Build the multipart form data for the docling-serve API.
+    # The API expects:
+    #   - "files": the uploaded file (as multipart file)
+    #   - "chunking_*": parameters for the HybridChunker (token-aware splitting)
+    #   - "include_converted_doc": if true, also returns the full markdown text
     tokenizer = settings.docling_tokenizer or "bert-base-uncased"
     form_data = {
         "chunking_max_tokens": str(settings.docling_max_tokens),

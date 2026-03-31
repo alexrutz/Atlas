@@ -1,4 +1,15 @@
-"""API routes: Conversation management (list, create, delete, messages)."""
+"""
+API routes: Conversation management (list, create, delete, load messages).
+
+Conversations store the chat history between a user and the system.
+Each conversation has multiple messages (user questions + assistant answers).
+
+The message metadata stores additional info like:
+  - rag_chunks: which document chunks were used to answer
+  - enriched_query: the enriched version of the user's question
+  - thinking: the LLM's reasoning process (if thinking mode was enabled)
+  - document_delivery: info about a delivered document (if "gib mir" was used)
+"""
 
 import logging
 

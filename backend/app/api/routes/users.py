@@ -1,4 +1,4 @@
-"""API-Routen: Benutzerverwaltung (Admin)."""
+"""API routes: User management (admin only). CRUD for user accounts."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession

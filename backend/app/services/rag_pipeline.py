@@ -1,17 +1,30 @@
 """
-RAG Pipeline - Orchestrates the full question-answering process.
+RAG Pipeline - The main orchestrator that ties everything together.
 
-Supports:
-- RAG mode: Retrieval + answer generation with document context
-- Free chat mode: Direct conversation without document context
-- Thinking mode: Shows the LLM's reasoning process
+RAG = Retrieval-Augmented Generation. The idea:
+  1. User asks a question
+  2. We find relevant document chunks (retrieval)
+  3. We give those chunks + the question to the LLM (generation)
+  4. The LLM answers based on the actual documents, not just its training data
+
+This module orchestrates the full flow:
+  1. Check which collections the user has access to
+  2. Optionally enrich the query with domain-specific terms
+  3. Search for relevant document chunks
+  4. Build a prompt with the chunks as context
+  5. Send to the LLM and get an answer
+  6. Save the conversation to the database
+
+Also handles:
+  - Free chat mode (skip retrieval, just talk to the LLM directly)
+  - Permission checks (users only see collections their groups have access to)
 
 Functions:
-    run_rag_query(db, question, user, ...) - Full RAG pipeline
+    run_rag_query(db, question, user, ...) - Full RAG pipeline (non-streaming)
     run_free_chat(db, question, user, ...) - Free chat without retrieval
     get_allowed_collection_ids(db, user)   - Get collections user can access
     get_selected_collection_ids(db, user, allowed_ids) - Get user's selected collections
-    save_to_conversation(db, user, ...)    - Save messages to conversation history
+    save_to_conversation(db, user, ...)    - Save Q&A to conversation history
 """
 
 import logging
@@ -154,11 +167,20 @@ async def run_free_chat(
 
 
 async def get_allowed_collection_ids(db: AsyncSession, user: User) -> list[int]:
-    """Get all collection IDs the user has read access to."""
+    """
+    Get all collection IDs the user has read access to.
+
+    Access control works through groups:
+      User → belongs to Groups → Groups have access to Collections
+
+    Admins can access all collections.
+    """
     if user.is_admin:
+        # Admins see everything
         result = await db.execute(select(Collection.id))
         return [row[0] for row in result.fetchall()]
 
+    # For normal users: find collections accessible through their groups
     result = await db.execute(
         select(GroupCollectionAccess.collection_id)
         .join(UserGroup, UserGroup.group_id == GroupCollectionAccess.group_id)
@@ -196,7 +218,17 @@ async def save_to_conversation(
     thinking: str | None = None,
     document_delivery: dict | None = None,
 ) -> int:
-    """Save user question and assistant answer to conversation history."""
+    """
+    Save the user's question and the assistant's answer to conversation history.
+
+    If conversation_id is provided, appends to that conversation.
+    Otherwise creates a new conversation.
+
+    The metadata stored on each message includes:
+      - User message: enriched_query (if enrichment was used)
+      - Assistant message: rag_chunks (source documents), thinking (reasoning),
+        document_delivery (if a document was delivered)
+    """
     if conversation_id:
         result = await db.execute(
             select(Conversation).where(

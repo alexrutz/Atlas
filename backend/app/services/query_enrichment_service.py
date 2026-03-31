@@ -1,8 +1,19 @@
 """
-Query Enrichment Service - Enriches search queries with context knowledge.
+Query Enrichment Service - Makes search queries better using domain knowledge.
 
-Loads global context and per-collection context, then asks the LLM to
-rephrase the query to include domain-specific terms.
+Problem: Users often ask questions using everyday language, but the documents
+use specific technical terms. For example, a user might ask "how do I connect
+the cable?" but the document says "attach the RJ45 connector to port A".
+
+Solution: Before searching, we ask the LLM to rephrase the query using
+domain-specific terminology. The LLM gets context about the company/domain
+(global context + per-collection context) and rewrites the query to include
+the correct technical terms. This improves search accuracy.
+
+Example:
+    Original: "how do I connect the cable?"
+    Context: "This collection contains network equipment installation manuals."
+    Enriched: "how to attach RJ45 connector to ethernet port"
 
 Functions:
     enrich_query(db, query, collection_ids, enable_thinking) - Enrich a search query

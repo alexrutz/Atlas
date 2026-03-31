@@ -1,11 +1,18 @@
 """
-Document Processor - Parsing and chunking of documents.
+Document Processor - Turns uploaded files into searchable chunks.
 
-Routes documents to docling-serve (PDF, DOCX, XLSX, PPTX, HTML, XML, images)
-or handles simple formats locally (TXT, MD, CSV, JSON).
+When a user uploads a document, this is what happens:
+  1. The file is parsed (text and structure extracted)
+     - Rich formats (PDF, DOCX, etc.) → sent to docling-serve (ML-powered parsing)
+     - Simple formats (TXT, MD, CSV, JSON) → parsed locally
+  2. The text is split into chunks (small pieces of ~512 characters)
+     - docling-serve returns chunks directly (with heading context)
+     - Local files are split using recursive text splitting
+  3. Each chunk is embedded (converted to a vector of numbers)
+  4. Chunks + embeddings are stored in the database
+  5. The document status is updated to "completed"
 
-Chunks are stored in the chunks table, embeddings in chunk_embeddings.
-Document-level metadata (stats, parse timings) stored in documents.metadata.
+If anything fails, the document status is set to "error" with the error message.
 
 Functions:
     process_document(db, document_id) - Full processing pipeline for one document
@@ -47,7 +54,8 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
         return
 
     try:
-        # Parse file (runs in thread to avoid blocking async loop)
+        # Parse file (runs in a separate thread because file I/O + HTTP calls
+        # to docling-serve are blocking operations that would freeze the async loop)
         is_docling = document.file_type.lower() in DOCLING_FORMATS
         pipeline = "docling-serve" if is_docling else "local"
         logger.info(f"Parsing document: {document.original_name} (pipeline={pipeline})")
@@ -74,7 +82,9 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
         chunk_objects = []
 
         for i, chunk_data in enumerate(chunks):
-            # Use contextualized text for embedding (includes heading/caption context)
+            # Use contextualized text for embedding if available.
+            # Contextualized text includes the section heading prepended to the chunk,
+            # which helps the embedding model understand what the chunk is about.
             embed_text = chunk_data.contextualized_text or chunk_data.text
             chunk_texts.append(embed_text)
 

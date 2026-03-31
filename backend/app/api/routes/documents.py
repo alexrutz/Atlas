@@ -1,4 +1,18 @@
-"""API-Routen: Dokument-Upload und -Verwaltung."""
+"""
+API routes: Document upload, processing, download, and management.
+
+Upload flow:
+  1. User uploads a file via POST /api/collections/{id}/documents
+  2. File is saved to disk, a Document record is created in the DB (status: "pending")
+  3. A background task is started to process the document:
+     a. Status changes to "processing"
+     b. File is parsed (docling-serve for rich formats, local for text)
+     c. Text is split into chunks
+     d. Each chunk is embedded (converted to a vector)
+     e. Chunks + embeddings are stored in the DB
+     f. Status changes to "completed" (or "error" if something failed)
+  4. Frontend polls GET /api/documents/{id}/status to track progress
+"""
 
 import io
 import uuid
@@ -22,7 +36,14 @@ router = APIRouter()
 
 
 async def process_document_task(document_id: int) -> None:
-    """Background-Task: Dokument verarbeiten (Parsing, Chunking, Embedding)."""
+    """
+    Background task: process a document (parsing, chunking, embedding).
+
+    This runs in the background after the upload response is sent.
+    Uses its own database sessions because the request's session is already closed.
+    If processing fails, the error is saved to the document record so the
+    frontend can display it.
+    """
     import logging
     from sqlalchemy import select as _select
     from app.models.document import Document

@@ -1,4 +1,10 @@
-"""API-Routen: Docker-Verwaltung (Container, Images, Volumes)."""
+"""
+API routes: Docker management (containers, images, volumes).
+
+Admin-only endpoints that allow monitoring and managing the Docker containers
+that make up the Atlas system (PostgreSQL, llama-server, docling-serve, etc.)
+from the web UI. Connects to the Docker daemon via the mounted Docker socket.
+"""
 
 import logging
 from typing import Any

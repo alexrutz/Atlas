@@ -1,4 +1,4 @@
-"""API-Routen: Gruppenverwaltung (Admin)."""
+"""API routes: Group management (admin only). CRUD for groups and member assignment."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession

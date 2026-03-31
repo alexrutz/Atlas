@@ -1,14 +1,20 @@
 """
 Central configuration - loads config.yaml and provides all settings.
 
-All settings are flat attributes on one Settings object.
-Environment variables in the YAML file (${VAR_NAME}) are resolved automatically.
+How configuration works:
+  1. All settings are defined in config.yaml (in the project root)
+  2. This module reads that file and creates a Settings object
+  3. The Settings object has flat attributes (e.g. settings.db_host, settings.llm_model)
+  4. Environment variables in the YAML (like ${DB_PASSWORD}) are automatically resolved
 
-Access examples:
-    settings.db_host
-    settings.llm_base_url
-    settings.llm_temperature
-    settings.auth_secret_key
+Usage anywhere in the code:
+    from app.core.config import settings
+    print(settings.llm_base_url)      # "http://llama-llm:8080"
+    print(settings.db_async_url)      # "postgresql+asyncpg://user:pass@host:5432/db"
+    print(settings.llm_temperature)   # 0.7
+
+All settings are loaded once at startup and cached.
+Some settings (prompts) can be overridden at runtime via the admin UI.
 """
 
 import os

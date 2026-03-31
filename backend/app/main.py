@@ -1,7 +1,11 @@
 """
 Atlas RAG System - FastAPI Entry Point
 
-Loads the central configuration and starts all API routes.
+This is the main file that starts the web server. It:
+  1. Creates the FastAPI application
+  2. Runs startup tasks (create DB tables, seed admin user, load settings)
+  3. Registers all API routes (auth, users, groups, collections, documents, chat, etc.)
+  4. Configures CORS (allows the frontend to call the backend API)
 """
 
 import logging

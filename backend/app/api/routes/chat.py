@@ -1,4 +1,25 @@
-"""API routes: Chat endpoints (RAG, free chat, document delivery, streaming)."""
+"""
+API routes: Chat endpoints (RAG, free chat, document delivery, streaming).
+
+This file handles the main chat functionality:
+  - POST /api/chat         → Non-streaming RAG query (returns full answer at once)
+  - POST /api/chat/stream  → Streaming RAG query (returns answer token by token via SSE)
+  - PUT  /api/chat/collections → Set which collections the user wants to search in
+
+Streaming uses Server-Sent Events (SSE):
+  The frontend opens a connection and receives events like:
+    data: {"type": "sources", "sources": [...]}     ← retrieved document chunks
+    data: {"type": "thinking", "content": "..."}    ← LLM reasoning (optional)
+    data: {"type": "token", "content": "..."}       ← answer text, one piece at a time
+    data: {"type": "document_delivery", ...}        ← document to download (for "gib mir")
+    data: {"type": "done", "conversation_id": 123}  ← finished
+
+Document delivery ("gib mir"):
+  When the user starts their message with "gib mir" (German for "give me"),
+  the system searches ALL collections and asks the LLM to identify which
+  specific document the user wants. The LLM responds with a special tool call
+  that the frontend uses to offer the document for download.
+"""
 
 import json
 import logging

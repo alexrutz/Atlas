@@ -1,8 +1,18 @@
 """
 Diagnostic logger for LLM calls.
 
-Writes full input/output of enrichment and RAG LLM calls to a dedicated
-log file that is tailed by the atlas-llm-diagnostic sidecar container.
+Writes the full input (prompts) and output (responses) of every LLM call
+to a dedicated log file: /app/logs/llm_diagnostic.log
+
+This file is tailed by the atlas-llm-diagnostic Docker container, so you
+can watch LLM interactions in real-time:
+    docker compose logs -f llm-diagnostic
+
+Uses ANSI colors for readability:
+  - Cyan: enrichment calls
+  - Yellow: RAG/chat calls
+  - Green: LLM output
+  - Red: errors
 """
 
 import logging

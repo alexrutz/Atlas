@@ -1,4 +1,4 @@
-"""API-Routen: Collections und Zugriffsrechte."""
+"""API routes: Collections and access control. CRUD + group permission management."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession

@@ -1,9 +1,22 @@
 """
-Retrieval Service - Semantic vector search with cross-encoder reranking.
+Retrieval Service - Finds relevant document chunks for a user's question.
 
-Searches only in collections the user has access to.
-Uses pgvector for semantic similarity search and FlashRank
-as cross-encoder for reranking.
+This is the "R" in RAG (Retrieval-Augmented Generation). Given a question,
+it finds the most relevant pieces of text from the uploaded documents.
+
+How the retrieval pipeline works:
+  1. The question is converted to an embedding vector (list of numbers)
+  2. pgvector finds chunks with similar embedding vectors (cosine similarity)
+  3. Low-similarity results are filtered out (below threshold)
+  4. A cross-encoder (FlashRank) reranks the results for better accuracy
+
+What is reranking?
+  Vector search is fast but approximate. The cross-encoder reads each
+  chunk together with the query and gives a more accurate relevance score.
+  It's slower but much better at ranking, so we use it as a second pass
+  on the top results from vector search.
+
+  If FlashRank is not available, falls back to a simple keyword overlap score.
 
 Functions:
     search_chunks(db, query, collection_ids, top_k)  - Full retrieval pipeline
@@ -56,7 +69,14 @@ def _tokenize(text_str: str) -> list[str]:
 
 
 def _keyword_score(query_tokens: list[str], chunk_tokens: list[str]) -> float:
-    """Combined Jaccard + term-frequency keyword overlap score in [0, 1]."""
+    """
+    Combined keyword overlap score between query and chunk (0 to 1).
+
+    Uses two measures:
+      - Jaccard similarity: what fraction of unique words appear in both texts
+      - Term frequency: how often query words appear in the chunk (capped at 3)
+    The final score is a 50/50 blend of both.
+    """
     if not query_tokens or not chunk_tokens:
         return 0.0
 
