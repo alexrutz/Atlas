@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.config import settings
 from app.core.database import engine, Base, async_session
 from app.core.security import hash_password
-from app.api.routes import auth, users, groups, collections, documents, chat, docker
+from app.api.routes import auth, users, groups, collections, documents, chat, conversations, docker
 from app.api.routes import settings as settings_router
 from app.services.llm_diagnostic import setup_diagnostic_logging
 
@@ -116,6 +116,7 @@ app.include_router(groups.router, prefix="/api/groups", tags=["Groups"])
 app.include_router(collections.router, prefix="/api/collections", tags=["Collections"])
 app.include_router(documents.router, prefix="/api", tags=["Documents"])
 app.include_router(chat.router, prefix="/api", tags=["Chat"])
+app.include_router(conversations.router, prefix="/api", tags=["Conversations"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(docker.router, prefix="/api/docker", tags=["Docker"])
 
