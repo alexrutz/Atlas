@@ -114,15 +114,26 @@ services:
   # API docs available at http://localhost:5001/docs
   # ---------------------------------------------------------------------------
   docling-serve:
-    image: ghcr.io/docling-project/docling-serve
+    image: ghcr.io/docling-project/docling-serve-cu130:main
     container_name: atlas-docling-serve
     restart: unless-stopped
     ports:
       - "5001:5001"
     environment:
       - DOCLING_SERVE_OCRENABLE=${DOCLING_DO_OCR:-true}
-      - DOCLING_SERVE_OCR_ENGINE=${DOCLING_OCR_ENGINE:-easyocr}
-      - DOCLING_SERVE_DOCUMENT_TIMEOUT=${DOCLING_DOCUMENT_TIMEOUT:-300}
+      - DOCLING_SERVE_OCR_ENGINE=${DOCLING_OCR_ENGINE:-rapidocr}
+      - DOCLING_SERVE_DOCUMENT_TIMEOUT=${DOCLING_DOCUMENT_TIMEOUT:-600}
+      - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_MAX_SYNC_WAIT:-600}
+      - DOCLING_SERVE_LOG_LEVEL=debug
+      - DOCLING_ACCELERATOR_DEVICE=${DOCLING_ACCELERATOR_DEVICE:-gpu}
+      - DOCLING_FLASH_ATTENTION=${DOCLING_FLASH_ATTENTION:-false}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 30s
