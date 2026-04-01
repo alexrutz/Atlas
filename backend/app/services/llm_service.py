@@ -33,11 +33,7 @@ from collections.abc import AsyncGenerator
 import httpx
 
 from app.core.config import settings
-from app.services.llm_diagnostic import (
-    log_enrichment_call,
-    log_rag_call,
-    log_rag_stream_complete,
-)
+from app.services.llm_diagnostic import log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -136,14 +132,16 @@ async def generate(
                 "thinking": choice.get("reasoning_content", ""),
             }
 
-            log_rag_call(
+            log_llm_call(
+                "FINAL RAG LLM",
                 system_prompt=system, user_prompt=prompt,
                 enable_thinking=enable_thinking,
                 output=result["content"], thinking=result["thinking"] or None,
             )
             return result
     except Exception as e:
-        log_rag_call(
+        log_llm_call(
+            "FINAL RAG LLM",
             system_prompt=system, user_prompt=prompt,
             enable_thinking=enable_thinking, error=str(e),
         )
@@ -166,7 +164,8 @@ async def generate_stream(
     body = _build_request_body(system, prompt, enable_thinking, stream=True)
 
     logger.info(f"generate_stream: enable_thinking={enable_thinking}")
-    log_rag_call(
+    log_llm_call(
+        "FINAL RAG LLM",
         system_prompt=system, user_prompt=prompt,
         enable_thinking=enable_thinking, is_stream_start=True,
     )
@@ -219,10 +218,10 @@ async def generate_enrichment(prompt: str, enable_thinking: bool = False) -> str
             data = response.json()
             result = data["choices"][0]["message"].get("content", "").strip()
 
-            log_enrichment_call(system_prompt=system, user_prompt=prompt, output=result)
+            log_llm_call("ENRICHMENT LLM", system_prompt=system, user_prompt=prompt, output=result)
             return result
     except Exception as e:
-        log_enrichment_call(system_prompt=system, user_prompt=prompt, output="", error=str(e))
+        log_llm_call("ENRICHMENT LLM", system_prompt=system, user_prompt=prompt, output="", error=str(e))
         raise
 
 
