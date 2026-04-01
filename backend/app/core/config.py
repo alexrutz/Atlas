@@ -125,6 +125,14 @@ class Settings:
         self.docling_merge_peers: bool = doc.get("merge_peers", True)
         self.docling_tokenizer: str = doc.get("tokenizer", "")
 
+        # Per-request conversion defaults (from environment via docker-compose)
+        self.docling_do_ocr: bool = os.environ.get("DOCLING_DO_OCR", "true").lower() == "true"
+        self.docling_do_table_structure: bool = os.environ.get("DOCLING_DO_TABLE_STRUCTURE", "true").lower() == "true"
+        self.docling_table_mode: str = os.environ.get("DOCLING_TABLE_MODE", "fast")
+        self.docling_do_code_enrichment: bool = os.environ.get("DOCLING_DO_CODE_ENRICHMENT", "true").lower() == "true"
+        self.docling_ocr_lang: str = os.environ.get("DOCLING_OCR_LANG", "")
+        self.docling_images_scale: float = float(os.environ.get("DOCLING_IMAGES_SCALE", "2.0"))
+
         # -- Chunking (local text files) --
         chunk = config.get("chunking", {})
         self.chunking_chunk_size: int = chunk.get("chunk_size", 512)

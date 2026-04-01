@@ -134,11 +134,20 @@ def _parse_with_docling_serve(file_path: str, file_type: str) -> ParsedDocument:
     #   - "include_converted_doc": if true, also returns the full markdown text
     tokenizer = settings.docling_tokenizer or "bert-base-uncased"
     form_data = {
+        # Chunking options
         "chunking_max_tokens": str(settings.docling_max_tokens),
         "chunking_merge_peers": str(settings.docling_merge_peers).lower(),
         "chunking_tokenizer": tokenizer,
         "include_converted_doc": "true",
+        # Conversion options (per-request defaults from env)
+        "convert_do_ocr": str(settings.docling_do_ocr).lower(),
+        "convert_do_table_structure": str(settings.docling_do_table_structure).lower(),
+        "convert_table_mode": settings.docling_table_mode,
+        "convert_do_code_enrichment": str(settings.docling_do_code_enrichment).lower(),
+        "convert_images_scale": str(settings.docling_images_scale),
     }
+    if settings.docling_ocr_lang:
+        form_data["convert_ocr_lang"] = settings.docling_ocr_lang
 
     last_error = None
     for attempt in range(_MAX_RETRIES + 1):
