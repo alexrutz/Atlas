@@ -44,21 +44,8 @@ async def enrich_query(
     Loads global + per-collection context, then asks the LLM to rephrase
     the query. If no context is available, returns the original query unchanged.
     """
-    context = await _load_context(db, collection_ids)
-
-    if not context:
-        logger.info("No context available - enriched_query = original_query")
-        return query
-
-    enriched = await _generate_enriched_query(query, context, enable_thinking)
-    return enriched
-
-
-async def _load_context(db: AsyncSession, collection_ids: list[int]) -> str:
-    """Load global context and per-collection context texts."""
-    parts = []
-
     # 1. Load global context
+    parts = []
     result = await db.execute(
         select(SystemSetting.value).where(SystemSetting.key == "global_context")
     )
@@ -71,20 +58,21 @@ async def _load_context(db: AsyncSession, collection_ids: list[int]) -> str:
         select(Collection.name, Collection.context_text)
         .where(Collection.id.in_(collection_ids))
     )
-    collection_contexts = result.fetchall()
-
-    col_context_lines = []
-    for col in collection_contexts:
-        if col.context_text:
-            col_context_lines.append(f"- {col.name}: {col.context_text}")
+    col_context_lines = [
+        f"- {col.name}: {col.context_text}"
+        for col in result.fetchall()
+        if col.context_text
+    ]
     if col_context_lines:
         parts.append("Collection context:\n" + "\n".join(col_context_lines))
 
-    return "\n\n".join(parts)
+    context = "\n\n".join(parts)
 
+    if not context:
+        logger.info("No context available - enriched_query = original_query")
+        return query
 
-async def _generate_enriched_query(query: str, context: str, enable_thinking: bool = False) -> str:
-    """Ask the LLM to enrich the query using the loaded context."""
+    # 3. Ask the LLM to rephrase using domain terminology
     prompt = settings.enrichment_prompt_template.format(
         context=context,
         query=query,
@@ -92,14 +80,12 @@ async def _generate_enriched_query(query: str, context: str, enable_thinking: bo
 
     try:
         enriched_query = await generate_enrichment(prompt, enable_thinking=enable_thinking)
-
         if enriched_query:
-            logger.info(f"Query enriched: '{query}' → '{enriched_query}'")
+            logger.info(f"Query enriched: '{query}' -> '{enriched_query}'")
             return enriched_query
         else:
             logger.warning("LLM returned empty response for query enrichment")
             return query
-
     except Exception as e:
         logger.warning(f"Query enrichment failed, using original query: {e}")
         return query

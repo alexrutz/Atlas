@@ -54,11 +54,7 @@ from app.services.llm_service import (
     build_rag_prompt,
     build_document_delivery_prompt,
 )
-from app.services.llm_diagnostic import (
-    log_free_chat_call,
-    log_free_chat_stream_complete,
-    log_rag_stream_complete,
-)
+from app.services.llm_diagnostic import log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +230,8 @@ async def _free_chat_stream(request: ChatRequest, user: User, db: AsyncSession):
     full_answer = ""
     full_thinking = ""
 
-    log_free_chat_call(
+    log_llm_call(
+        "FREE CHAT LLM",
         system_prompt=system,
         user_prompt=request.question,
         enable_thinking=request.enable_thinking,
@@ -256,7 +253,8 @@ async def _free_chat_stream(request: ChatRequest, user: User, db: AsyncSession):
                 data = json.dumps({"type": "token", "content": chunk["text"]})
                 yield f"data: {data}\n\n"
 
-        log_free_chat_stream_complete(
+        log_llm_call(
+            "FREE CHAT LLM (stream complete)",
             output=full_answer,
             thinking=full_thinking or None,
         )
@@ -336,7 +334,7 @@ async def _rag_stream(
                 data = json.dumps({"type": "token", "content": chunk["text"]})
                 yield f"data: {data}\n\n"
 
-        log_rag_stream_complete(output=full_answer, thinking=full_thinking or None)
+        log_llm_call("FINAL RAG LLM (stream complete)", output=full_answer, thinking=full_thinking or None)
 
         # Document delivery: parse LLM response for tool call
         delivery_info = None

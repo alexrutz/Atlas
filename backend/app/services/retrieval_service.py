@@ -24,6 +24,7 @@ Functions:
     rerank(query, results) - Rerank results for better accuracy
 """
 
+import functools
 import logging
 import re
 from collections import Counter
@@ -175,23 +176,19 @@ async def vector_search(
 # Reranking (cross-encoder or keyword fallback)
 # =============================================================================
 
-# The cross-encoder model is loaded once and reused (it's ~34 MB).
-_ranker = None
-
-
+@functools.cache
 def _get_ranker():
-    """Load the FlashRank cross-encoder model (only on first call)."""
-    global _ranker
-    if _ranker is None:
-        try:
-            from flashrank import Ranker
-            model = settings.retrieval_rerank_model
-            logger.info(f"Loading FlashRank cross-encoder: {model}")
-            _ranker = Ranker(model_name=model, cache_dir="/tmp/flashrank")
-            logger.info("FlashRank cross-encoder loaded successfully")
-        except Exception as exc:
-            logger.warning(f"FlashRank not available ({exc}), will use keyword fallback")
-    return _ranker
+    """Load the FlashRank cross-encoder model (only on first call, cached thereafter)."""
+    try:
+        from flashrank import Ranker
+        model = settings.retrieval_rerank_model
+        logger.info(f"Loading FlashRank cross-encoder: {model}")
+        ranker = Ranker(model_name=model, cache_dir="/tmp/flashrank")
+        logger.info("FlashRank cross-encoder loaded successfully")
+        return ranker
+    except Exception as exc:
+        logger.warning(f"FlashRank not available ({exc}), will use keyword fallback")
+        return None
 
 
 def rerank(query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:

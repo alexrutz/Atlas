@@ -15,6 +15,7 @@ Upload flow:
 """
 
 import io
+import logging
 import uuid
 from pathlib import Path
 
@@ -23,16 +24,36 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.database import get_db
+from app.core.database import get_db, async_session
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.models.document import Document
 from app.models.collection import Collection
 from app.schemas.document import DocumentResponse, DocumentStatusResponse
-from app.core.database import async_session
+from app.services.document_processor import process_document
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _set_document_status(document_id: int, status: str, error: str | None = None) -> bool:
+    """Update document processing status in its own transaction. Returns True if document was found."""
+    try:
+        async with async_session() as db:
+            result = await db.execute(select(Document).where(Document.id == document_id))
+            doc = result.scalar_one_or_none()
+            if not doc:
+                return False
+            doc.processing_status = status
+            if error is not None:
+                doc.processing_error = error
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to set document {document_id} status to '{status}': {e}")
+        return False
 
 
 async def process_document_task(document_id: int) -> None:
@@ -44,52 +65,21 @@ async def process_document_task(document_id: int) -> None:
     If processing fails, the error is saved to the document record so the
     frontend can display it.
     """
-    import logging
-    from sqlalchemy import select as _select
-    from app.models.document import Document
-    logger = logging.getLogger(__name__)
-    logger.info(f"Starte Hintergrund-Verarbeitung für Dokument {document_id}")
-    from app.services.document_processor import process_document
+    logger.info(f"Starting background processing for document {document_id}")
 
-    # Commit "processing" status immediately in its own transaction so
-    # polling clients see the status change right away (flush alone is
-    # invisible to other sessions).
-    try:
-        async with async_session() as status_db:
-            result = await status_db.execute(
-                _select(Document).where(Document.id == document_id)
-            )
-            doc = result.scalar_one_or_none()
-            if not doc:
-                logger.error(f"Dokument {document_id} nicht gefunden")
-                return
-            doc.processing_status = "processing"
-            await status_db.commit()
-    except Exception as e:
-        logger.error(f"Konnte Verarbeitungsstatus nicht setzen: {e}")
+    # Set "processing" status so polling clients see it immediately
+    if not await _set_document_status(document_id, "processing"):
+        logger.error(f"Document {document_id} not found")
+        return
 
     try:
         async with async_session() as db:
             await process_document(db, document_id)
             await db.commit()
-            logger.info(f"Dokument {document_id} erfolgreich verarbeitet")
+            logger.info(f"Document {document_id} processed successfully")
     except Exception as e:
-        logger.error(f"Fehler bei Verarbeitung von Dokument {document_id}: {e}", exc_info=True)
-        # Save error status in a fresh session — the main session was rolled back
-        # (SQLAlchemy auto-rolls back on context manager exit after exception),
-        # which would otherwise leave the document stuck in "processing" forever.
-        try:
-            async with async_session() as err_db:
-                result = await err_db.execute(
-                    _select(Document).where(Document.id == document_id)
-                )
-                doc = result.scalar_one_or_none()
-                if doc:
-                    doc.processing_status = "error"
-                    doc.processing_error = str(e)
-                    await err_db.commit()
-        except Exception as inner:
-            logger.error(f"Konnte Fehlerstatus für Dokument {document_id} nicht speichern: {inner}")
+        logger.error(f"Error processing document {document_id}: {e}", exc_info=True)
+        await _set_document_status(document_id, "error", str(e))
 
 
 @router.get("/collections/{collection_id}/documents", response_model=list[DocumentResponse])

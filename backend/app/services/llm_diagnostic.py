@@ -30,130 +30,64 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 
 
-def _separator(color: str, label: str) -> str:
-    ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
-    return f"{color}{BOLD}{'=' * 80}\n[{ts}] {label}\n{'=' * 80}{RESET}"
-
-
-def log_enrichment_call(
-    system_prompt: str,
-    user_prompt: str,
-    output: str,
-    error: str | None = None,
-) -> None:
-    """Log the full enrichment LLM call input and output."""
-    parts = [
-        _separator(CYAN, "ENRICHMENT LLM"),
-        f"{CYAN}{BOLD}SYSTEM PROMPT:{RESET}",
-        f"{CYAN}{system_prompt}{RESET}",
-        f"{CYAN}{BOLD}USER PROMPT:{RESET}",
-        f"{CYAN}{user_prompt}{RESET}",
-    ]
-    if error:
-        parts.append(f"{RED}{BOLD}ERROR:{RESET} {RED}{error}{RESET}")
-    else:
-        parts.append(f"{GREEN}{BOLD}OUTPUT:{RESET}")
-        parts.append(f"{GREEN}{output}{RESET}")
-    parts.append(f"{CYAN}{DIM}{'─' * 80}{RESET}")
-
-    msg = "\n".join(parts)
-    _diag_logger.info(msg)
-
-
-def log_rag_call(
-    system_prompt: str,
-    user_prompt: str,
-    enable_thinking: bool,
+def log_llm_call(
+    label: str,
+    *,
+    system_prompt: str | None = None,
+    user_prompt: str | None = None,
+    enable_thinking: bool | None = None,
     output: str | None = None,
     thinking: str | None = None,
-    is_stream_start: bool = False,
     error: str | None = None,
+    is_stream_start: bool = False,
 ) -> None:
-    """Log the full RAG/final LLM call input and output."""
-    parts = [
-        _separator(YELLOW, "FINAL RAG LLM"),
-        f"{YELLOW}{BOLD}SYSTEM PROMPT:{RESET}",
-        f"{YELLOW}{system_prompt}{RESET}",
-        f"{YELLOW}{BOLD}USER PROMPT:{RESET}",
-        f"{YELLOW}{user_prompt}{RESET}",
-        f"{YELLOW}{DIM}enable_thinking={enable_thinking}{RESET}",
-    ]
+    """
+    Log an LLM call with colored output.
+
+    This single function replaces the previous 5 separate log functions.
+    The `label` determines the header and color:
+      - Labels containing "ENRICHMENT" use cyan
+      - Everything else uses yellow
+
+    Examples:
+        log_llm_call("ENRICHMENT LLM", system_prompt=..., user_prompt=..., output=...)
+        log_llm_call("FINAL RAG LLM", system_prompt=..., user_prompt=..., is_stream_start=True)
+        log_llm_call("FINAL RAG LLM (stream complete)", output=..., thinking=...)
+        log_llm_call("FREE CHAT LLM", system_prompt=..., user_prompt=..., is_stream_start=True)
+        log_llm_call("FREE CHAT LLM (stream complete)", output=..., thinking=...)
+    """
+    color = CYAN if "ENRICHMENT" in label else YELLOW
+
+    # Header
+    ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+    parts = [f"{color}{BOLD}{'=' * 80}\n[{ts}] {label}\n{'=' * 80}{RESET}"]
+
+    # Prompts (if provided)
+    if system_prompt is not None:
+        parts.append(f"{color}{BOLD}SYSTEM PROMPT:{RESET}")
+        parts.append(f"{color}{system_prompt}{RESET}")
+    if user_prompt is not None:
+        parts.append(f"{color}{BOLD}USER PROMPT:{RESET}")
+        parts.append(f"{color}{user_prompt}{RESET}")
+    if enable_thinking is not None:
+        parts.append(f"{color}{DIM}enable_thinking={enable_thinking}{RESET}")
+
+    # Output section
     if is_stream_start:
-        parts.append(f"{YELLOW}{DIM}(streaming started...){RESET}")
+        parts.append(f"{color}{DIM}(streaming started...){RESET}")
     elif error:
         parts.append(f"{RED}{BOLD}ERROR:{RESET} {RED}{error}{RESET}")
     else:
         if thinking:
-            parts.append(f"{YELLOW}{BOLD}THINKING:{RESET}")
+            parts.append(f"{color}{BOLD}THINKING:{RESET}")
             parts.append(f"{DIM}{thinking}{RESET}")
         if output is not None:
             parts.append(f"{GREEN}{BOLD}OUTPUT:{RESET}")
             parts.append(f"{GREEN}{output}{RESET}")
-    parts.append(f"{YELLOW}{DIM}{'─' * 80}{RESET}")
 
-    msg = "\n".join(parts)
-    _diag_logger.info(msg)
+    parts.append(f"{color}{DIM}{'─' * 80}{RESET}")
 
-
-def log_rag_stream_complete(
-    output: str,
-    thinking: str | None = None,
-) -> None:
-    """Log final output after a streaming RAG call completes."""
-    parts = [
-        _separator(YELLOW, "FINAL RAG LLM (stream complete)"),
-    ]
-    if thinking:
-        parts.append(f"{YELLOW}{BOLD}THINKING:{RESET}")
-        parts.append(f"{DIM}{thinking}{RESET}")
-    parts.append(f"{GREEN}{BOLD}OUTPUT:{RESET}")
-    parts.append(f"{GREEN}{output}{RESET}")
-    parts.append(f"{YELLOW}{DIM}{'─' * 80}{RESET}")
-
-    msg = "\n".join(parts)
-    _diag_logger.info(msg)
-
-
-def log_free_chat_call(
-    system_prompt: str,
-    user_prompt: str,
-    enable_thinking: bool,
-    is_stream_start: bool = False,
-) -> None:
-    """Log a free chat LLM call start."""
-    parts = [
-        _separator(YELLOW, "FREE CHAT LLM"),
-        f"{YELLOW}{BOLD}SYSTEM PROMPT:{RESET}",
-        f"{YELLOW}{system_prompt}{RESET}",
-        f"{YELLOW}{BOLD}USER PROMPT:{RESET}",
-        f"{YELLOW}{user_prompt}{RESET}",
-        f"{YELLOW}{DIM}enable_thinking={enable_thinking}{RESET}",
-    ]
-    if is_stream_start:
-        parts.append(f"{YELLOW}{DIM}(streaming started...){RESET}")
-    parts.append(f"{YELLOW}{DIM}{'─' * 80}{RESET}")
-
-    msg = "\n".join(parts)
-    _diag_logger.info(msg)
-
-
-def log_free_chat_stream_complete(
-    output: str,
-    thinking: str | None = None,
-) -> None:
-    """Log final output after a free chat streaming call completes."""
-    parts = [
-        _separator(YELLOW, "FREE CHAT LLM (stream complete)"),
-    ]
-    if thinking:
-        parts.append(f"{YELLOW}{BOLD}THINKING:{RESET}")
-        parts.append(f"{DIM}{thinking}{RESET}")
-    parts.append(f"{GREEN}{BOLD}OUTPUT:{RESET}")
-    parts.append(f"{GREEN}{output}{RESET}")
-    parts.append(f"{YELLOW}{DIM}{'─' * 80}{RESET}")
-
-    msg = "\n".join(parts)
-    _diag_logger.info(msg)
+    _diag_logger.info("\n".join(parts))
 
 
 def setup_diagnostic_logging(log_path: str = "/app/logs/llm_diagnostic.log") -> None:

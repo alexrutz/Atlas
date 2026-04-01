@@ -39,11 +39,13 @@ def chunk_text(
     Returns:
         List of ChunkData
     """
+    separators = ["\n\n", "\n", ". ", " "]
+
     # If we have sections, chunk each section separately to keep metadata
     if sections:
         chunks = []
         for section in sections:
-            section_chunks = _split_recursive(section.content, chunk_size, overlap)
+            section_chunks = _split_with_separators(section.content, separators, chunk_size, overlap)
             for chunk in section_chunks:
                 chunk.section_header = section.header
                 chunk.page_number = section.page_number
@@ -51,22 +53,6 @@ def chunk_text(
         return chunks
 
     # Otherwise just chunk the whole text
-    return _split_recursive(text, chunk_size, overlap)
-
-
-def _split_recursive(
-    text: str,
-    chunk_size: int,
-    overlap: int,
-) -> list[ChunkData]:
-    """
-    Recursively split text using a hierarchy of separators.
-
-    Tries to split on the largest separator first (paragraph breaks),
-    then falls back to smaller separators (line breaks, sentences, spaces).
-    If nothing works, falls back to fixed-size character splits.
-    """
-    separators = ["\n\n", "\n", ". ", " "]
     return _split_with_separators(text, separators, chunk_size, overlap)
 
 
