@@ -94,8 +94,8 @@ services:
       --host 0.0.0.0
       --n-gpu-layers 0
       --ctx-size ${EMBED_CTX_SIZE:-8192}
-      --batch-size 2048
-      --ubatch-size 1024
+      --batch-size 4096
+      --ubatch-size 2048
       --alias embed
       --embedding
     deploy:
