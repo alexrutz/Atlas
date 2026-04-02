@@ -56,6 +56,7 @@ services:
       --ctx-size ${LLM_CTX_SIZE:-65536}
       --alias llm
       --jinja
+      --flash-attn on
     deploy:
       resources:
         reservations:
