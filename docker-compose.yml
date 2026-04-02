@@ -53,7 +53,8 @@ services:
       --port 8080
       --host 0.0.0.0
       --n-gpu-layers ${LLM_N_GPU_LAYERS:--1}
-      --ctx-size ${LLM_CTX_SIZE:-65536}
+      --ctx-size ${LLM_CTX_SIZE:-8192}
+      --parallel 1
       --alias llm
       --jinja
       --flash-attn on
