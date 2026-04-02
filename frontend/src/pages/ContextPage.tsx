@@ -44,7 +44,7 @@ export default function ContextPage() {
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="z.B. L1 = Kühlerlänge, B2 = Gehäusebreite, VEM = Vereinigte Elektrizitätswerke Mansfeld..."
+            placeholder="z.B. Regionen: EU = Europa, A = Asien, Maschinenschlüssel: xxx-xxx, ..."
             className="flex-1 w-full text-sm p-4 border rounded-lg resize-none focus:ring-2 focus:ring-atlas-500 outline-none bg-white"
           />
           <div className="mt-3 flex items-center gap-3">
