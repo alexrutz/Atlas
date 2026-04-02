@@ -82,7 +82,7 @@ services:
   # Runs on CPU (--n-gpu-layers 0) so the LLM keeps full VRAM.
   # ---------------------------------------------------------------------------
   llama-embed:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server
     container_name: atlas-llama-embed
     restart: unless-stopped
     user: root
@@ -91,13 +91,13 @@ services:
     volumes:
       - ../models:/models
     command: >
-      -m /models/pplx-embed-context-v1-0.6b-q8_0.gguf
+      -m /models/pplx-embed-v1-0.6b-q8_0.gguf
       --port 8081
       --host 0.0.0.0
       --n-gpu-layers 0
       --ctx-size ${EMBED_CTX_SIZE:-8192}
       --batch-size 4096
-      --ubatch-size 2048
+      --ubatch-size 4096
       --alias embed
       --embedding
     deploy:
@@ -131,13 +131,13 @@ services:
     environment:
       # OCR
       - DOCLING_SERVE_OCRENABLE=${DOCLING_DO_OCR:-true}
-      - DOCLING_SERVE_OCR_ENGINE=${DOCLING_OCR_ENGINE:-easyocr}
+      - DOCLING_SERVE_OCR_ENGINE=${DOCLING_OCR_ENGINE:-rapidocr}
       # Batch sizes
       - DOCLING_SERVE_OCR_BATCH_SIZE=${DOCLING_OCR_BATCH_SIZE:-4}
       - DOCLING_SERVE_LAYOUT_BATCH_SIZE=${DOCLING_LAYOUT_BATCH_SIZE:-4}
       - DOCLING_SERVE_TABLE_BATCH_SIZE=${DOCLING_TABLE_BATCH_SIZE:-4}
       # Timeouts
-      - DOCLING_SERVE_DOCUMENT_TIMEOUT=${DOCLING_DOCUMENT_TIMEOUT:-300}
+      - DOCLING_SERVE_DOCUMENT_TIMEOUT=${DOCLING_DOCUMENT_TIMEOUT:-600}
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_MAX_SYNC_WAIT:-600}
       # Workers & threading
       - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=${DOCLING_WORKERS:-2}
@@ -145,8 +145,8 @@ services:
       - DOCLING_NUM_THREADS=${DOCLING_NUM_THREADS:-4}
       # Model loading & acceleration
       - DOCLING_SERVE_LOAD_MODELS_AT_BOOT=${DOCLING_WARMUP:-true}
-      - DOCLING_ACCELERATOR_DEVICE=${DOCLING_ACCELERATOR_DEVICE:-auto}
-      - DOCLING_FLASH_ATTENTION=${DOCLING_FLASH_ATTENTION:-false}
+      - DOCLING_ACCELERATOR_DEVICE=${DOCLING_ACCELERATOR_DEVICE:-cpu}
+      - DOCLING_FLASH_ATTENTION=${DOCLING_FLASH_ATTENTION:-true}
       # Logging
       - DOCLING_SERVE_LOG_LEVEL=${DOCLING_LOG_LEVEL:-info}
     deploy:
