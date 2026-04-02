@@ -91,7 +91,7 @@ services:
     volumes:
       - ../models:/models
     command: >
-      -m /models/pplx-embed-v1-0.6b-q8_0.gguf
+      -m /models/pplx-embed-v1-0.6B-Q4_K_M.gguf
       --port 8081
       --host 0.0.0.0
       --n-gpu-layers 0
