@@ -95,10 +95,10 @@ services:
       --port 8081
       --host 0.0.0.0
       --n-gpu-layers -1
-      --ctx-size ${EMBED_CTX_SIZE:-8192}
+      --ctx-size ${EMBED_CTX_SIZE:-512}
       --parallel 1
-      --batch-size 4096
-      --ubatch-size 4096
+      --batch-size 512
+      --ubatch-size 512
       --alias embed
       --embedding
     deploy:
