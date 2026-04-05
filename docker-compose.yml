@@ -49,7 +49,7 @@ services:
     volumes:
       - ../models:/models
     command: >
-      -m /models/Qwen3.5-35B-A3B-UD-IQ3_S.gguf
+      -m /models/gemma-4-26B-A4B-it-UD-Q3_K_M.gguf
       --port 8080
       --host 0.0.0.0
       --n-gpu-layers ${LLM_N_GPU_LAYERS:--1}
