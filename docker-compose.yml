@@ -124,7 +124,7 @@ services:
   # API docs available at http://localhost:5001/docs
   # ---------------------------------------------------------------------------
   docling-serve:
-    image: ghcr.io/docling-project/docling-serve-cu130:main
+    image: ghcr.io/docling-project/docling-serve:main
     container_name: atlas-docling-serve
     restart: unless-stopped
     ports:
@@ -150,13 +150,6 @@ services:
       - DOCLING_FLASH_ATTENTION=${DOCLING_FLASH_ATTENTION:-true}
       # Logging
       - DOCLING_SERVE_LOG_LEVEL=${DOCLING_LOG_LEVEL:-info}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 30s
