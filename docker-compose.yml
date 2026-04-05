@@ -100,6 +100,13 @@ services:
       --ubatch-size 4096
       --alias embed
       --embedding
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
@@ -138,10 +145,17 @@ services:
       - DOCLING_NUM_THREADS=${DOCLING_NUM_THREADS:-4}
       # Model loading & acceleration
       - DOCLING_SERVE_LOAD_MODELS_AT_BOOT=${DOCLING_WARMUP:-true}
-      - DOCLING_ACCELERATOR_DEVICE=${DOCLING_ACCELERATOR_DEVICE:-cpu}
+      - DOCLING_ACCELERATOR_DEVICE=${DOCLING_ACCELERATOR_DEVICE:-gpu}
       - DOCLING_FLASH_ATTENTION=${DOCLING_FLASH_ATTENTION:-true}
       # Logging
       - DOCLING_SERVE_LOG_LEVEL=${DOCLING_LOG_LEVEL:-info}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 30s
