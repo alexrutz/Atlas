@@ -82,7 +82,7 @@ services:
   # Runs on CPU (--n-gpu-layers 0) so the LLM keeps full VRAM.
   # ---------------------------------------------------------------------------
   llama-embed:
-    image: ghcr.io/ggml-org/llama.cpp:server
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: atlas-llama-embed
     restart: unless-stopped
     user: root
