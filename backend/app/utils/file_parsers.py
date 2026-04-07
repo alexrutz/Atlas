@@ -6,7 +6,8 @@ Two parsing paths:
      - Conversion runs in docling-serve (separate Docker container with ML models)
      - Returns the full DoclingDocument JSON (layout, tables, figures, headings)
      - Chunking runs in-process using docling-core's HybridChunker
-     - Tables are never split across chunks (split table chunks are merged)
+     - HybridChunker splits tables row-by-row (via LineBasedTokenChunker),
+       repeats table headers in each chunk, and never splits a row mid-line
      - Chunks include heading context (e.g. "Chapter 3 > Section 3.1 > ...")
 
   2. Local parsing (for truly plain formats: TXT, JSON)
@@ -117,8 +118,8 @@ def _parse_with_docling(file_path: str, file_type: str) -> ParsedDocument:
     1. Sends the file to docling-serve's /v1/convert/file endpoint to get a
        full DoclingDocument (with layout analysis, table recognition, etc.)
     2. Chunks the DoclingDocument in-process using HybridChunker
-    3. Merges any chunks where a table was split across chunk boundaries
-    4. Extracts document statistics from the structured DoclingDocument
+       (tables are split row-by-row with headers repeated — handled by docling)
+    3. Extracts document statistics from the structured DoclingDocument
     """
     from app.core.config import settings
 
@@ -253,7 +254,13 @@ def _chunk_docling_document(
     max_tokens: int,
     merge_peers: bool,
 ) -> list[ChunkData]:
-    """Chunk a DoclingDocument using HybridChunker, then fix split tables."""
+    """Chunk a DoclingDocument using HybridChunker.
+
+    HybridChunker handles tables natively:
+    - Tables are split row-by-row via LineBasedTokenChunker (no row is split mid-line)
+    - Table headers are repeated in each chunk (repeat_table_header=True)
+    - Table rows are serialized via TripletTableSerializer (one line per row)
+    """
     from docling_core.transforms.chunker import HybridChunker
     from docling_core.transforms.chunker.tokenizer.huggingface import (
         HuggingFaceTokenizer,
@@ -263,24 +270,23 @@ def _chunk_docling_document(
     tok = AutoTokenizer.from_pretrained(tokenizer_name)
     hf_tok = HuggingFaceTokenizer(tokenizer=tok, max_tokens=max_tokens)
 
-    chunker = HybridChunker(tokenizer=hf_tok, merge_peers=merge_peers)
+    chunker = HybridChunker(
+        tokenizer=hf_tok,
+        merge_peers=merge_peers,
+        repeat_table_header=True,
+    )
     raw_chunks = list(chunker.chunk(dl_doc=dl_doc))
-
-    # Fix table chunks: merge split tables, then re-split at row boundaries
-    fixed_chunks = _fix_table_chunks(raw_chunks, tok, max_tokens)
 
     # Convert to ChunkData
     chunks = []
-    for chunk in fixed_chunks:
+    for chunk in raw_chunks:
         contextualized = chunker.contextualize(chunk)
 
         headings = chunk.meta.headings or []
         section_header = " > ".join(headings) if headings else None
 
-        # Collect page numbers from doc_items' prov (provenance) if available
         page_number = _extract_page_number(chunk)
 
-        # Determine labels from doc_items
         labels = list({
             item.label.value
             for item in (chunk.meta.doc_items or [])
@@ -292,7 +298,7 @@ def _chunk_docling_document(
             section_header=section_header,
             page_number=page_number,
             contextualized_text=contextualized if contextualized != chunk.text else None,
-            token_count=None,  # Not directly available on merged chunks
+            token_count=getattr(chunk.meta, "token_count", None),
             labels=labels,
         ))
 
@@ -307,175 +313,6 @@ def _extract_page_number(chunk) -> int | None:
                 if hasattr(prov, "page_no"):
                     return prov.page_no
     return None
-
-
-# =============================================================================
-# Table chunk logic: merge split tables, then re-split at row boundaries
-# =============================================================================
-
-def _chunk_table_refs(chunk) -> set[str]:
-    """Get table JSON pointer refs (e.g. '#/tables/0') from a chunk's doc_items."""
-    refs = set()
-    for item in (chunk.meta.doc_items or []):
-        ref = item.self_ref
-        if ref and "/tables/" in ref:
-            refs.add(ref)
-    return refs
-
-
-def _fix_table_chunks(chunks: list, tokenizer, max_tokens: int) -> list:
-    """Fix table chunks: merge split tables, then re-split at row boundaries.
-
-    When HybridChunker splits a large table, rows can be cut mid-line.
-    This function:
-      1. Merges consecutive chunks that reference the same table into one
-      2. Re-splits oversized table chunks at complete row boundaries so
-         each chunk stays within max_tokens and no row is split.
-    """
-    if not chunks:
-        return chunks
-
-    # Step 1: Merge consecutive chunks referencing the same table
-    merged = [chunks[0]]
-    for chunk in chunks[1:]:
-        prev_refs = _chunk_table_refs(merged[-1])
-        curr_refs = _chunk_table_refs(chunk)
-
-        if prev_refs and curr_refs and (prev_refs & curr_refs):
-            merged[-1] = _merge_two_chunks(merged[-1], chunk)
-        else:
-            merged.append(chunk)
-
-    # Step 2: Re-split oversized table chunks at row boundaries
-    result = []
-    for chunk in merged:
-        table_refs = _chunk_table_refs(chunk)
-        token_count = len(tokenizer.encode(chunk.text, add_special_tokens=False))
-
-        if table_refs and token_count > max_tokens:
-            sub_chunks = _split_table_chunk_by_rows(chunk, tokenizer, max_tokens)
-            result.extend(sub_chunks)
-            logger.info(
-                f"Re-split oversized table chunk ({token_count} tokens) "
-                f"into {len(sub_chunks)} chunks at row boundaries"
-            )
-        else:
-            result.append(chunk)
-
-    return result
-
-
-def _split_table_chunk_by_rows(chunk, tokenizer, max_tokens: int) -> list:
-    """Split a table chunk at complete row boundaries to fit max_tokens.
-
-    Each output chunk contains only complete table rows (lines starting with |).
-    The table header (first two lines: column names + separator) is repeated
-    in each chunk for context.
-    """
-    from docling_core.transforms.chunker.doc_chunk import DocChunk, DocMeta
-
-    lines = chunk.text.split("\n")
-
-    # Identify the table header (column names + separator like |---|---|)
-    # and separate it from data rows
-    header_lines = []
-    data_lines = []
-    found_separator = False
-    for line in lines:
-        stripped = line.strip()
-        if not found_separator and stripped.startswith("|"):
-            header_lines.append(line)
-            # Check if this is the separator line (e.g. |---|---|)
-            if _is_table_separator(stripped):
-                found_separator = True
-        else:
-            data_lines.append(line)
-
-    header_text = "\n".join(header_lines)
-    header_tokens = len(tokenizer.encode(header_text, add_special_tokens=False)) if header_lines else 0
-    available_tokens = max_tokens - header_tokens
-
-    if available_tokens < 50:
-        # Header alone nearly fills the limit; skip header repetition
-        header_text = ""
-        header_tokens = 0
-        available_tokens = max_tokens
-        data_lines = lines  # Use all lines as data
-
-    # Group data lines into chunks that fit within max_tokens
-    sub_chunks = []
-    current_lines = []
-    current_tokens = 0
-
-    for line in data_lines:
-        line_tokens = len(tokenizer.encode(line, add_special_tokens=False))
-
-        if current_lines and current_tokens + line_tokens > available_tokens:
-            # Flush current buffer as a chunk
-            chunk_text = header_text + "\n" + "\n".join(current_lines) if header_text else "\n".join(current_lines)
-            sub_chunks.append(DocChunk(
-                text=chunk_text.strip(),
-                meta=DocMeta(
-                    doc_items=list(chunk.meta.doc_items or []),
-                    headings=chunk.meta.headings,
-                    captions=chunk.meta.captions,
-                    origin=chunk.meta.origin,
-                ),
-            ))
-            current_lines = []
-            current_tokens = 0
-
-        current_lines.append(line)
-        current_tokens += line_tokens
-
-    # Don't forget the last buffer
-    if current_lines:
-        chunk_text = header_text + "\n" + "\n".join(current_lines) if header_text else "\n".join(current_lines)
-        sub_chunks.append(DocChunk(
-            text=chunk_text.strip(),
-            meta=DocMeta(
-                doc_items=list(chunk.meta.doc_items or []),
-                headings=chunk.meta.headings,
-                captions=chunk.meta.captions,
-                origin=chunk.meta.origin,
-            ),
-        ))
-
-    return sub_chunks if sub_chunks else [chunk]
-
-
-def _is_table_separator(line: str) -> bool:
-    """Check if a line is a markdown table separator (e.g. |---|---|)."""
-    # Remove outer pipes and check if remaining cells are all dashes/colons
-    inner = line.strip().strip("|")
-    cells = inner.split("|")
-    return all(cell.strip().replace("-", "").replace(":", "") == "" for cell in cells)
-
-
-def _merge_two_chunks(a, b):
-    """Merge two DocChunk objects into one, preserving metadata."""
-    from docling_core.transforms.chunker.doc_chunk import DocChunk, DocMeta
-
-    # Combine text
-    merged_text = a.text + "\n" + b.text
-
-    # Combine doc_items (deduplicate by self_ref)
-    seen_refs = set()
-    merged_items = []
-    for item in list(a.meta.doc_items or []) + list(b.meta.doc_items or []):
-        if item.self_ref not in seen_refs:
-            seen_refs.add(item.self_ref)
-            merged_items.append(item)
-
-    # Keep first chunk's headings and captions
-    merged_meta = DocMeta(
-        doc_items=merged_items,
-        headings=a.meta.headings or b.meta.headings,
-        captions=a.meta.captions or b.meta.captions,
-        origin=a.meta.origin,
-    )
-
-    return DocChunk(text=merged_text, meta=merged_meta)
 
 
 # =============================================================================

@@ -97,7 +97,7 @@ embedding:
 # -----------------------------------------------------------------------------
 docling:
   base_url: "http://docling-serve:5001"
-  max_tokens: 256                 # Token limit per chunk for HybridChunker
+  max_tokens: 512                 # Token limit per chunk for HybridChunker (matches embedding ctx-size)
   merge_peers: true              # Merge undersized adjacent chunks with same headings
   tokenizer: "perplexity-ai/pplx-embed-v1-0.6b"  # HuggingFace tokenizer
 
