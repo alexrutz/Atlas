@@ -83,7 +83,7 @@ llm:
 embedding:
   base_url: "http://llama-embed:8081"
   model: "embed"
-  batch_size: 512
+  batch_size: 550
   max_retries: 3
   timeout: 60
 
