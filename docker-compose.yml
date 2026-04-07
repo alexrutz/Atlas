@@ -97,8 +97,8 @@ services:
       --n-gpu-layers -1
       --ctx-size ${EMBED_CTX_SIZE:-512}
       --parallel 1
-      --batch-size 512
-      --ubatch-size 512
+      --batch-size 550
+      --ubatch-size 550
       --alias embed
       --embedding
     deploy:
