@@ -23,8 +23,6 @@ pydantic==2.10.4
 # HTTP Client (for Docling API and vLLM calls)
 httpx==0.28.1
 
-# Docling document processing (chunking with HybridChunker, DoclingDocument types)
-docling-core[chunking]
 
 # PDF page rendering (for page-view endpoint)
 pypdf==5.1.0

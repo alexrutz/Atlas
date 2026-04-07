@@ -2,11 +2,8 @@
 Document Processor - Turns uploaded files into searchable chunks.
 
 When a user uploads a document, this is what happens:
-  1. The file is parsed and chunked:
-     - Rich formats (PDF, DOCX, etc.) → converted by docling-serve, chunked in-process
-     - Simple formats (TXT, JSON) → read locally, chunked in-process
-     - All chunking uses docling-core's HybridChunker (token-aware, structure-preserving)
-     - Tables are never split across chunks
+  1. The file is parsed + chunked by docling-serve via
+     /v1/chunk/hybrid/file/async
   2. Each chunk is embedded (converted to a vector of numbers)
   3. Chunks + embeddings are stored in the database
   4. The document status is updated to "completed"
@@ -27,8 +24,7 @@ from app.core.config import settings
 from app.models.document import Document
 from app.models.chunk import Chunk, ChunkEmbedding
 from app.services.embedding_service import embed_batch
-from app.utils.file_parsers import parse_document, ParsedDocument, DOCLING_FORMATS
-from app.utils.text_processing import chunk_text  # Fallback only
+from app.utils.file_parsers import parse_document
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +35,11 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
 
     Flow:
     1. Load document from DB
-    2. Parse file (docling-serve for rich formats, local for text formats)
-    3. Use docling chunks if available, otherwise chunk locally
-    4. Compute embedding for each chunk
-    5. Store chunks + embeddings
-    6. Store document-level metadata (stats, timings)
-    7. Update document status
+    2. Parse + chunk the file via docling-serve async hybrid endpoint
+    3. Compute embedding for each chunk
+    4. Store chunks + embeddings
+    5. Store document-level metadata (stats, timings)
+    6. Update document status
     """
     result = await db.execute(select(Document).where(Document.id == document_id))
     document = result.scalar_one_or_none()
@@ -53,26 +48,11 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
         return
 
     try:
-        # Parse file (runs in a separate thread because file I/O + HTTP calls
-        # to docling-serve are blocking operations that would freeze the async loop)
-        is_docling = document.file_type.lower() in DOCLING_FORMATS
-        pipeline = "docling" if is_docling else "local"
-        logger.info(f"Parsing document: {document.original_name} (pipeline={pipeline})")
+        logger.info(f"Parsing document via docling async hybrid endpoint: {document.original_name}")
         parsed = await asyncio.to_thread(parse_document, document.file_path, document.file_type)
 
-        # All parsers now return chunks (via HybridChunker).
-        # Fallback to text_processing.chunk_text only if chunks are empty.
-        if parsed.chunks:
-            chunks = parsed.chunks
-            chunker_type = "docling"
-        else:
-            chunker_type = "local-fallback"
-            logger.warning("No chunks from parser, falling back to text splitter")
-            chunks = await asyncio.to_thread(
-                chunk_text,
-                text=parsed.text,
-                sections=parsed.sections,
-            )
+        chunks = parsed.chunks
+        chunker_type = "docling-hybrid-async"
 
         # Prepare chunks and texts for embedding
         logger.info(f"Processing {len(chunks)} chunks")
@@ -88,7 +68,7 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
 
             # Build chunk metadata
             chunk_meta = {
-                "parser": parsed.metadata.get("parser", pipeline),
+                "parser": parsed.metadata.get("parser", "docling-hybrid-async"),
                 "chunker": chunker_type,
             }
             if chunk_data.contextualized_text:
@@ -144,7 +124,7 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
 
         logger.info(
             f"Document {document.original_name} processed: "
-            f"{len(chunk_objects)} chunks, pipeline={pipeline}"
+            f"{len(chunk_objects)} chunks, parser={parsed.metadata.get('parser', 'docling-hybrid-async')}"
         )
 
     except Exception as e:
