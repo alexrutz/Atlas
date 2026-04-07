@@ -118,7 +118,9 @@ class Settings:
         self.embedding_max_retries: int = emb.get("max_retries", 3)
         self.embedding_timeout: int = emb.get("timeout", 60)
 
-        # -- Docling Serve --
+        # -- Docling --
+        # Conversion runs in docling-serve (Docker container with ML models).
+        # Chunking runs in-process using docling-core's HybridChunker.
         doc = config.get("docling", {})
         self.docling_base_url: str = doc.get("base_url", "http://docling-serve:5001")
         self.docling_max_tokens: int = doc.get("max_tokens", 512)
@@ -132,11 +134,6 @@ class Settings:
         self.docling_do_code_enrichment: bool = os.environ.get("DOCLING_DO_CODE_ENRICHMENT", "true").lower() == "true"
         self.docling_ocr_lang: str = os.environ.get("DOCLING_OCR_LANG", "")
         self.docling_images_scale: float = float(os.environ.get("DOCLING_IMAGES_SCALE", "2.0"))
-
-        # -- Chunking (local text files) --
-        chunk = config.get("chunking", {})
-        self.chunking_chunk_size: int = chunk.get("chunk_size", 512)
-        self.chunking_chunk_overlap: int = chunk.get("chunk_overlap", 50)
 
         # -- Retrieval --
         ret = config.get("retrieval", {})

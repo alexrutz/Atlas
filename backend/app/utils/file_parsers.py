@@ -2,20 +2,20 @@
 Document parsers - extracts text from uploaded files.
 
 Two parsing paths:
-  1. Docling Serve (for complex formats: PDF, DOCX, XLSX, PPTX, HTML, XML, images)
-     - Runs in a separate Docker container with ML models
-     - Does layout analysis, table recognition, OCR for images
-     - Returns both the full markdown text AND pre-made chunks
+  1. Docling (for rich/structured formats: PDF, DOCX, XLSX, PPTX, HTML, XML, images, MD, CSV)
+     - Conversion runs in docling-serve (separate Docker container with ML models)
+     - Returns the full DoclingDocument JSON (layout, tables, figures, headings)
+     - Chunking runs in-process using docling-core's HybridChunker
+     - Tables are never split across chunks (split table chunks are merged)
      - Chunks include heading context (e.g. "Chapter 3 > Section 3.1 > ...")
 
-  2. Local parsing (for simple formats: TXT, MD, CSV, JSON)
-     - Just reads the file as text, no ML needed
-     - Chunking is done separately by text_processing.py
+  2. Local parsing (for truly plain formats: TXT, JSON)
+     - File is read as text, then converted to a DoclingDocument for chunking
+     - HybridChunker is still used for token-aware, structure-preserving splits
 
 The parse_document() function automatically picks the right parser based on file type.
 """
 
-import csv
 import logging
 import time
 from dataclasses import dataclass, field
@@ -69,15 +69,17 @@ class ParsedDocument:
     stats: DocumentStats = field(default_factory=DocumentStats)
 
 
-# Formats handled by docling-serve (ML-powered parsing)
+# Formats converted by docling-serve (ML-powered parsing) then chunked in-process.
+# Includes MD and CSV which docling handles natively with structure preservation.
 DOCLING_FORMATS = {
     ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx",
     ".html", ".xml",
     ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp",
+    ".md", ".csv",
 }
 
-# Formats handled locally (simple text extraction)
-LOCAL_FORMATS = {".txt", ".md", ".csv", ".json"}
+# Formats read locally and converted to a DoclingDocument for chunking.
+LOCAL_FORMATS = {".txt", ".json"}
 
 
 def parse_document(file_path: str, file_type: str) -> ParsedDocument:
@@ -94,7 +96,7 @@ def parse_document(file_path: str, file_type: str) -> ParsedDocument:
     ext = file_type.lower()
 
     if ext in DOCLING_FORMATS:
-        return _parse_with_docling_serve(file_path, ext)
+        return _parse_with_docling(file_path, ext)
     elif ext in LOCAL_FORMATS:
         return _parse_locally(file_path, ext)
     else:
@@ -102,23 +104,23 @@ def parse_document(file_path: str, file_type: str) -> ParsedDocument:
 
 
 # =============================================================================
-# Docling Serve (official pre-built image, ML parsing + chunking)
+# Docling: convert via docling-serve, chunk in-process with HybridChunker
 # =============================================================================
 
 _MAX_RETRIES = 2
 _RETRY_DELAY = 3.0
 
 
-def _parse_with_docling_serve(file_path: str, file_type: str) -> ParsedDocument:
-    """Parse and chunk a document via the official docling-serve API.
+def _parse_with_docling(file_path: str, file_type: str) -> ParsedDocument:
+    """Convert a document via docling-serve, then chunk in-process.
 
-    Calls POST /v1/chunk/hybrid/file with include_converted_doc=true so we get
-    both the chunks AND the full markdown text in one request.
-    Retries on transient server errors.
+    1. Sends the file to docling-serve's /v1/convert/file endpoint to get a
+       full DoclingDocument (with layout analysis, table recognition, etc.)
+    2. Chunks the DoclingDocument in-process using HybridChunker
+    3. Merges any chunks where a table was split across chunk boundaries
+    4. Extracts document statistics from the structured DoclingDocument
     """
     from app.core.config import settings
-
-    url = f"{settings.docling_base_url}/v1/chunk/hybrid/file"
 
     path = Path(file_path)
     if not path.exists():
@@ -127,29 +129,69 @@ def _parse_with_docling_serve(file_path: str, file_type: str) -> ParsedDocument:
     with open(path, "rb") as f:
         file_bytes = f.read()
 
-    # Build the multipart form data for the docling-serve API.
-    # The API expects:
-    #   - "files": the uploaded file (as multipart file)
-    #   - "chunking_*": parameters for the HybridChunker (token-aware splitting)
-    #   - "include_converted_doc": if true, also returns the full markdown text
-    tokenizer = settings.docling_tokenizer or "bert-base-uncased"
+    # --- Step 1: Convert via docling-serve ---
+    dl_doc, processing_time = _convert_with_docling_serve(
+        path, file_bytes, settings
+    )
+
+    # --- Step 2: Export markdown ---
+    md_text = dl_doc.export_to_markdown()
+
+    # --- Step 3: Chunk with HybridChunker ---
+    tokenizer_name = settings.docling_tokenizer or "bert-base-uncased"
+    chunks = _chunk_docling_document(
+        dl_doc,
+        tokenizer_name=tokenizer_name,
+        max_tokens=settings.docling_max_tokens,
+        merge_peers=settings.docling_merge_peers,
+    )
+
+    # --- Step 4: Build stats from DoclingDocument ---
+    stats = _build_stats(dl_doc)
+
+    logger.info(
+        f"docling: {path.name} → {len(chunks)} chunks, "
+        f"{stats.num_pages or '?'} pages "
+        f"(took {processing_time:.1f}s)"
+    )
+
+    return ParsedDocument(
+        text=md_text,
+        sections=[],
+        page_count=stats.num_pages,
+        metadata={
+            "parser": "docling",
+            "filename": path.name,
+            "file_type": file_type,
+            "file_size_bytes": len(file_bytes),
+            "total_time_s": round(processing_time, 2),
+            "tokenizer": tokenizer_name,
+            "max_tokens": settings.docling_max_tokens,
+        },
+        chunks=chunks,
+        stats=stats,
+    )
+
+
+def _convert_with_docling_serve(path, file_bytes, settings):
+    """Send file to docling-serve /v1/convert/file and return DoclingDocument."""
+    from docling_core.types.doc import DoclingDocument
+
+    url = f"{settings.docling_base_url}/v1/convert/file"
+
     form_data = {
-        # Chunking options
-        "chunking_max_tokens": str(settings.docling_max_tokens),
-        "chunking_merge_peers": str(settings.docling_merge_peers).lower(),
-        "chunking_tokenizer": tokenizer,
-        "include_converted_doc": "true",
-        # Conversion options (per-request defaults from env)
-        "convert_do_ocr": str(settings.docling_do_ocr).lower(),
-        "convert_do_table_structure": str(settings.docling_do_table_structure).lower(),
-        "convert_table_mode": settings.docling_table_mode,
-        "convert_do_code_enrichment": str(settings.docling_do_code_enrichment).lower(),
-        "convert_images_scale": str(settings.docling_images_scale),
+        "to_formats": "json",
+        "do_ocr": str(settings.docling_do_ocr).lower(),
+        "do_table_structure": str(settings.docling_do_table_structure).lower(),
+        "table_mode": settings.docling_table_mode,
+        "do_code_enrichment": str(settings.docling_do_code_enrichment).lower(),
+        "images_scale": str(settings.docling_images_scale),
     }
     if settings.docling_ocr_lang:
-        form_data["convert_ocr_lang"] = settings.docling_ocr_lang
+        form_data["ocr_lang"] = settings.docling_ocr_lang
 
     last_error = None
+    response = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
             logger.info(
@@ -172,7 +214,7 @@ def _parse_with_docling_serve(file_path: str, file_type: str) -> ParsedDocument:
                     f"docling-serve error ({response.status_code}): {response.text}"
                 )
                 if response.status_code < 500:
-                    raise last_error  # Client error, don't retry
+                    raise last_error
         except httpx.TimeoutException as e:
             last_error = e
             logger.warning(f"docling-serve timeout (attempt {attempt + 1}): {e}")
@@ -185,125 +227,232 @@ def _parse_with_docling_serve(file_path: str, file_type: str) -> ParsedDocument:
         if attempt < _MAX_RETRIES:
             time.sleep(_RETRY_DELAY)
     else:
-        raise RuntimeError(f"docling-serve failed after {_MAX_RETRIES + 1} attempts: {last_error}")
+        raise RuntimeError(
+            f"docling-serve failed after {_MAX_RETRIES + 1} attempts: {last_error}"
+        )
 
     result = response.json()
-
-    # --- Extract full markdown text from the converted document ---
-    md_text = ""
-    documents = result.get("documents", [])
-    if documents:
-        content = documents[0].get("content", {})
-        md_text = content.get("md_content", "") or content.get("text_content", "") or ""
-
-    # --- Convert chunks from docling-serve format to our ChunkData format ---
-    # docling-serve returns chunks with these fields:
-    #   text (contextualized), raw_text, num_tokens, headings, page_numbers, etc.
-    chunks = []
-    for c in result.get("chunks", []):
-        # "text" in docling-serve is already the contextualized text (with headings prepended)
-        contextualized = c.get("text", "")
-        # "raw_text" is the chunk text without heading context (only if include_raw_text was set)
-        raw_text = c.get("raw_text", "") or contextualized
-
-        # Build section header from the headings list
-        headings = c.get("headings", [])
-        section_header = " > ".join(headings) if headings else None
-
-        # Page numbers come as a list; take the first one
-        page_numbers = c.get("page_numbers", [])
-        page_number = page_numbers[0] if page_numbers else None
-
-        chunks.append(ChunkData(
-            text=raw_text,
-            section_header=section_header,
-            page_number=page_number,
-            contextualized_text=contextualized,
-            token_count=c.get("num_tokens"),
-            labels=[],
-        ))
-
-    # --- Build stats (docling-serve doesn't return stats directly, ---
-    # --- so we estimate from the converted document if available)  ---
-    stats = DocumentStats()
-    if documents:
-        timings = documents[0].get("timings", {})
-        # Page count can be inferred from the chunks' page numbers
-        all_pages = set()
-        for c in result.get("chunks", []):
-            for p in c.get("page_numbers", []):
-                all_pages.add(p)
-        if all_pages:
-            stats.num_pages = max(all_pages)
-
     processing_time = result.get("processing_time", 0)
 
-    logger.info(
-        f"docling-serve: {path.name} → {len(chunks)} chunks, "
-        f"{stats.num_pages or '?'} pages "
-        f"(took {processing_time:.1f}s)"
-    )
+    # The convert endpoint returns the DoclingDocument under document.json_content
+    doc_data = result.get("document", {})
+    json_content = doc_data.get("json_content", {})
+    if not json_content:
+        raise RuntimeError(
+            "docling-serve returned no json_content. "
+            "Ensure to_formats includes 'json'."
+        )
 
-    return ParsedDocument(
-        text=md_text,
-        sections=[],  # docling-serve doesn't return sections separately
-        page_count=stats.num_pages,
-        metadata={
-            "parser": "docling-serve",
-            "filename": path.name,
-            "file_type": file_type,
-            "file_size_bytes": len(file_bytes),
-            "total_time_s": round(processing_time, 2),
-            "tokenizer": tokenizer,
-            "max_tokens": settings.docling_max_tokens,
-        },
-        chunks=chunks,
-        stats=stats,
+    dl_doc = DoclingDocument.model_validate(json_content)
+    return dl_doc, processing_time
+
+
+def _chunk_docling_document(
+    dl_doc,
+    tokenizer_name: str,
+    max_tokens: int,
+    merge_peers: bool,
+) -> list[ChunkData]:
+    """Chunk a DoclingDocument using HybridChunker, then merge split tables."""
+    from docling_core.transforms.chunker import HybridChunker
+    from docling_core.transforms.chunker.tokenizer.huggingface import (
+        HuggingFaceTokenizer,
     )
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(tokenizer_name)
+    hf_tok = HuggingFaceTokenizer(tokenizer=tok, max_tokens=max_tokens)
+
+    chunker = HybridChunker(tokenizer=hf_tok, merge_peers=merge_peers)
+    raw_chunks = list(chunker.chunk(dl_doc=dl_doc))
+
+    # Merge consecutive chunks that split the same table
+    merged_chunks = _merge_split_table_chunks(raw_chunks)
+
+    # Convert to ChunkData
+    chunks = []
+    for chunk in merged_chunks:
+        contextualized = chunker.contextualize(chunk)
+
+        headings = chunk.meta.headings or []
+        section_header = " > ".join(headings) if headings else None
+
+        # Collect page numbers from doc_items' prov (provenance) if available
+        page_number = _extract_page_number(chunk)
+
+        # Determine labels from doc_items
+        labels = list({
+            item.label.value
+            for item in (chunk.meta.doc_items or [])
+            if hasattr(item, "label") and item.label is not None
+        })
+
+        chunks.append(ChunkData(
+            text=chunk.text,
+            section_header=section_header,
+            page_number=page_number,
+            contextualized_text=contextualized if contextualized != chunk.text else None,
+            token_count=None,  # Not directly available on merged chunks
+            labels=labels,
+        ))
+
+    return chunks
+
+
+def _extract_page_number(chunk) -> int | None:
+    """Extract first page number from a chunk's doc_items provenance."""
+    for item in (chunk.meta.doc_items or []):
+        if hasattr(item, "prov") and item.prov:
+            for prov in item.prov:
+                if hasattr(prov, "page_no"):
+                    return prov.page_no
+    return None
 
 
 # =============================================================================
-# Local parsers (simple text-based formats)
+# Table merge logic: prevent table rows from being split across chunks
+# =============================================================================
+
+def _chunk_table_refs(chunk) -> set[str]:
+    """Get table JSON pointer refs (e.g. '#/tables/0') from a chunk's doc_items."""
+    refs = set()
+    for item in (chunk.meta.doc_items or []):
+        ref = item.self_ref
+        if ref and "/tables/" in ref:
+            refs.add(ref)
+    return refs
+
+
+def _merge_split_table_chunks(chunks: list) -> list:
+    """Merge consecutive chunks that reference the same table.
+
+    When HybridChunker splits a large table across multiple chunks, each chunk's
+    meta.doc_items will contain the same table reference (e.g. '#/tables/0').
+    This function detects that and merges them back into a single chunk so that
+    no table row is split across chunk boundaries.
+    """
+    if not chunks:
+        return chunks
+
+    merged = [chunks[0]]
+    for chunk in chunks[1:]:
+        prev_refs = _chunk_table_refs(merged[-1])
+        curr_refs = _chunk_table_refs(chunk)
+
+        if prev_refs and curr_refs and (prev_refs & curr_refs):
+            # Same table split across chunks — merge them
+            merged[-1] = _merge_two_chunks(merged[-1], chunk)
+            logger.debug(
+                f"Merged split table chunk (refs: {prev_refs & curr_refs})"
+            )
+        else:
+            merged.append(chunk)
+
+    if len(merged) < len(chunks):
+        logger.info(
+            f"Merged {len(chunks) - len(merged)} split-table chunks "
+            f"({len(chunks)} → {len(merged)})"
+        )
+
+    return merged
+
+
+def _merge_two_chunks(a, b):
+    """Merge two DocChunk objects into one, preserving metadata."""
+    from docling_core.transforms.chunker.doc_chunk import DocChunk, DocMeta
+
+    # Combine text
+    merged_text = a.text + "\n" + b.text
+
+    # Combine doc_items (deduplicate by self_ref)
+    seen_refs = set()
+    merged_items = []
+    for item in list(a.meta.doc_items or []) + list(b.meta.doc_items or []):
+        if item.self_ref not in seen_refs:
+            seen_refs.add(item.self_ref)
+            merged_items.append(item)
+
+    # Keep first chunk's headings and captions
+    merged_meta = DocMeta(
+        doc_items=merged_items,
+        headings=a.meta.headings or b.meta.headings,
+        captions=a.meta.captions or b.meta.captions,
+        origin=a.meta.origin,
+    )
+
+    return DocChunk(text=merged_text, meta=merged_meta)
+
+
+# =============================================================================
+# Document statistics from DoclingDocument structure
+# =============================================================================
+
+def _build_stats(dl_doc) -> DocumentStats:
+    """Extract document statistics from a DoclingDocument."""
+    from docling_core.types.doc import DocItemLabel
+
+    stats = DocumentStats()
+    stats.num_pages = dl_doc.num_pages() if dl_doc.num_pages() > 0 else None
+    stats.num_tables = len(dl_doc.tables)
+    stats.num_figures = len(dl_doc.pictures)
+
+    for item, _level in dl_doc.iterate_items():
+        label = getattr(item, "label", None)
+        if label == DocItemLabel.SECTION_HEADER or label == DocItemLabel.TITLE:
+            stats.num_headings += 1
+        elif label == DocItemLabel.LIST_ITEM:
+            stats.num_list_items += 1
+        elif label == DocItemLabel.CODE:
+            stats.num_code_blocks += 1
+        elif label == DocItemLabel.TEXT or label == DocItemLabel.PARAGRAPH:
+            stats.num_text_elements += 1
+
+    return stats
+
+
+# =============================================================================
+# Local parsers (TXT, JSON — read as text, chunk with HybridChunker)
 # =============================================================================
 
 def _parse_locally(file_path: str, file_type: str) -> ParsedDocument:
-    """Parse simple text-based formats locally."""
-    parsers = {
-        ".txt": _parse_text,
-        ".md": _parse_text,
-        ".csv": _parse_csv,
-        ".json": _parse_text,
-    }
+    """Parse plain text files locally, then chunk with HybridChunker."""
+    from app.core.config import settings
+    from docling_core.types.doc import DoclingDocument, DocItemLabel
 
-    parser = parsers.get(file_type)
-    if not parser:
-        raise ValueError(f"No local parser for: {file_type}")
-
-    return parser(file_path)
-
-
-def _parse_text(file_path: str) -> ParsedDocument:
-    """Parse a plain text file."""
-    with open(file_path, encoding="utf-8", errors="replace") as f:
+    path = Path(file_path)
+    with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
-    return ParsedDocument(
-        text=text,
-        sections=[ParsedSection(header=None, content=text)],
-        metadata={"parser": "local"},
+
+    if not text.strip():
+        return ParsedDocument(
+            text=text,
+            metadata={"parser": "local"},
+        )
+
+    # Build a DoclingDocument from plain text so HybridChunker can process it
+    dl_doc = DoclingDocument(name=path.stem)
+
+    # Split on double newlines to preserve paragraph structure
+    paragraphs = text.split("\n\n")
+    for para in paragraphs:
+        para = para.strip()
+        if para:
+            dl_doc.add_text(label=DocItemLabel.TEXT, text=para)
+
+    # Chunk using HybridChunker (same as docling path)
+    tokenizer_name = settings.docling_tokenizer or "bert-base-uncased"
+    chunks = _chunk_docling_document(
+        dl_doc,
+        tokenizer_name=tokenizer_name,
+        max_tokens=settings.docling_max_tokens,
+        merge_peers=settings.docling_merge_peers,
     )
 
+    logger.info(f"local: {path.name} → {len(chunks)} chunks")
 
-def _parse_csv(file_path: str) -> ParsedDocument:
-    """Parse a CSV file."""
-    rows = []
-    with open(file_path, encoding="utf-8", errors="replace") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            rows.append(" | ".join(row))
-
-    text = "\n".join(rows)
     return ParsedDocument(
         text=text,
         sections=[ParsedSection(header=None, content=text)],
-        metadata={"parser": "local"},
+        metadata={"parser": "local", "filename": path.name},
+        chunks=chunks,
     )

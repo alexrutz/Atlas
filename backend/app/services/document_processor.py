@@ -2,15 +2,14 @@
 Document Processor - Turns uploaded files into searchable chunks.
 
 When a user uploads a document, this is what happens:
-  1. The file is parsed (text and structure extracted)
-     - Rich formats (PDF, DOCX, etc.) → sent to docling-serve (ML-powered parsing)
-     - Simple formats (TXT, MD, CSV, JSON) → parsed locally
-  2. The text is split into chunks (small pieces of ~512 characters)
-     - docling-serve returns chunks directly (with heading context)
-     - Local files are split using recursive text splitting
-  3. Each chunk is embedded (converted to a vector of numbers)
-  4. Chunks + embeddings are stored in the database
-  5. The document status is updated to "completed"
+  1. The file is parsed and chunked:
+     - Rich formats (PDF, DOCX, etc.) → converted by docling-serve, chunked in-process
+     - Simple formats (TXT, JSON) → read locally, chunked in-process
+     - All chunking uses docling-core's HybridChunker (token-aware, structure-preserving)
+     - Tables are never split across chunks
+  2. Each chunk is embedded (converted to a vector of numbers)
+  3. Chunks + embeddings are stored in the database
+  4. The document status is updated to "completed"
 
 If anything fails, the document status is set to "error" with the error message.
 
@@ -29,7 +28,7 @@ from app.models.document import Document
 from app.models.chunk import Chunk, ChunkEmbedding
 from app.services.embedding_service import embed_batch
 from app.utils.file_parsers import parse_document, ParsedDocument, DOCLING_FORMATS
-from app.utils.text_processing import chunk_text
+from app.utils.text_processing import chunk_text  # Fallback only
 
 logger = logging.getLogger(__name__)
 
@@ -57,22 +56,21 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
         # Parse file (runs in a separate thread because file I/O + HTTP calls
         # to docling-serve are blocking operations that would freeze the async loop)
         is_docling = document.file_type.lower() in DOCLING_FORMATS
-        pipeline = "docling-serve" if is_docling else "local"
+        pipeline = "docling" if is_docling else "local"
         logger.info(f"Parsing document: {document.original_name} (pipeline={pipeline})")
         parsed = await asyncio.to_thread(parse_document, document.file_path, document.file_type)
 
-        # Use docling chunks if available, otherwise chunk locally
+        # All parsers now return chunks (via HybridChunker).
+        # Fallback to text_processing.chunk_text only if chunks are empty.
         if parsed.chunks:
             chunks = parsed.chunks
             chunker_type = "docling"
         else:
-            chunker_type = "local"
-            logger.info("Chunking locally (recursive text splitter)")
+            chunker_type = "local-fallback"
+            logger.warning("No chunks from parser, falling back to text splitter")
             chunks = await asyncio.to_thread(
                 chunk_text,
                 text=parsed.text,
-                chunk_size=settings.chunking_chunk_size,
-                overlap=settings.chunking_chunk_overlap,
                 sections=parsed.sections,
             )
 
