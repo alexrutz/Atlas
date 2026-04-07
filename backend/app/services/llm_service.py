@@ -93,6 +93,7 @@ def _build_request_body(
         ],
         **sampling,
         "chat_template_kwargs": {"enable_thinking": enable_thinking},
+        "reasoning_format": "deepseek" if enable_thinking else "none",
         "max_tokens": max_tokens or settings.llm_max_tokens,
         "stream": stream,
     }

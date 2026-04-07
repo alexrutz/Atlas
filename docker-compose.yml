@@ -35,6 +35,8 @@ services:
   # Downloads the model directly from Hugging Face on first start.
   # --jinja enables Jinja2 chat templates so thinking can be controlled
   # at runtime via the model's built-in template (enable_thinking parameter).
+  # --reasoning-format deepseek outputs thinking in reasoning_content field.
+  # --reasoning-budget controls max thinking tokens (-1 = unlimited).
   # ---------------------------------------------------------------------------
   llama-llm:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -58,6 +60,8 @@ services:
       --alias llm
       --jinja
       --flash-attn on
+      --reasoning-format ${LLM_REASONING_FORMAT:-deepseek}
+      --reasoning-budget ${LLM_REASONING_BUDGET:--1}
     deploy:
       resources:
         reservations:
