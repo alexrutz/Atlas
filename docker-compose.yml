@@ -60,7 +60,7 @@ services:
       --alias llm
       --jinja
       --flash-attn on
-      --reasoning-format ${LLM_REASONING_FORMAT:-deepseek}
+      --reasoning-format ${LLM_REASONING_FORMAT:-auto}
       --reasoning-budget ${LLM_REASONING_BUDGET:--1}
     deploy:
       resources:

@@ -93,7 +93,6 @@ def _build_request_body(
         ],
         **sampling,
         "chat_template_kwargs": {"enable_thinking": enable_thinking},
-        "reasoning_format": "deepseek" if enable_thinking else "none",
         "max_tokens": max_tokens or settings.llm_max_tokens,
         "stream": stream,
     }
@@ -206,7 +205,8 @@ async def generate_enrichment(prompt: str, enable_thinking: bool = False) -> str
     system = settings.llm_enrichment_system_prompt or settings.llm_system_prompt
     body = _build_request_body(
         system, prompt, enable_thinking, stream=False,
-        max_tokens=4096, temperature_override=0.0,
+        max_tokens=4096,
+        temperature_override=None if enable_thinking else 0.0,
     )
 
     try:
