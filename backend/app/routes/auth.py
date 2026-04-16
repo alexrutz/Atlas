@@ -2,10 +2,10 @@
 API routes: Authentication (login, token refresh, password change).
 
 Authentication flow:
-  1. POST /api/auth/login → sends username + password, gets access + refresh tokens
+  1. POST /api/auth/login -> sends username + password, gets access + refresh tokens
   2. Frontend stores the tokens and sends the access token with every request
   3. When the access token expires, POST /api/auth/refresh with the refresh token
-  4. GET /api/auth/me → returns info about the currently logged-in user
+  4. GET /api/auth/me -> returns info about the currently logged-in user
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,11 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 
-from app.core.database import get_db
-from app.core.security import verify_password, create_access_token, create_refresh_token, decode_token, hash_password
-from app.core.dependencies import get_current_user
-from app.models.user import User
-from app.schemas.chat import LoginRequest, TokenResponse, UserBrief
+from app.database import get_db
+from app.auth import (
+    verify_password, create_access_token, create_refresh_token,
+    decode_token, hash_password, get_current_user,
+)
+from app.models import User
+from app.schemas import LoginRequest, TokenResponse, UserBrief
 
 router = APIRouter()
 

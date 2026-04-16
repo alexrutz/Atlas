@@ -19,26 +19,24 @@ import logging
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, BackgroundTasks
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.database import get_db, async_session
-from app.core.config import settings
-from app.core.dependencies import get_current_user
-from app.models.user import User
-from app.models.document import Document
-from app.models.collection import Collection
-from app.schemas.document import DocumentResponse, DocumentStatusResponse
-from app.services.document_processor import process_document
+from app.database import get_db, async_session
+from app.config import settings
+from app.auth import get_current_user
+from app.models import User, Document, Collection
+from app.schemas import DocumentResponse, DocumentStatusResponse
+from app.document_processing import process_document
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-async def _set_document_status(document_id: int, status: str, error: str | None = None) -> bool:
+async def _set_document_status(document_id: int, status_val: str, error: str | None = None) -> bool:
     """Update document processing status in its own transaction. Returns True if document was found."""
     try:
         async with async_session() as db:
@@ -46,13 +44,13 @@ async def _set_document_status(document_id: int, status: str, error: str | None 
             doc = result.scalar_one_or_none()
             if not doc:
                 return False
-            doc.processing_status = status
+            doc.processing_status = status_val
             if error is not None:
                 doc.processing_error = error
             await db.commit()
             return True
     except Exception as e:
-        logger.error(f"Failed to set document {document_id} status to '{status}': {e}")
+        logger.error(f"Failed to set document {document_id} status to '{status_val}': {e}")
         return False
 
 
@@ -62,12 +60,9 @@ async def process_document_task(document_id: int) -> None:
 
     This runs in the background after the upload response is sent.
     Uses its own database sessions because the request's session is already closed.
-    If processing fails, the error is saved to the document record so the
-    frontend can display it.
     """
     logger.info(f"Starting background processing for document {document_id}")
 
-    # Set "processing" status so polling clients see it immediately
     if not await _set_document_status(document_id, "processing"):
         logger.error(f"Document {document_id} not found")
         return
@@ -106,12 +101,10 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
 ):
     """Dokument hochladen und Verarbeitung starten."""
-    # Prüfe Collection
     result = await db.execute(select(Collection).where(Collection.id == collection_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collection nicht gefunden")
 
-    # Prüfe Dateiformat
     suffix = Path(file.filename).suffix.lower()
     if suffix not in settings.documents_supported_formats:
         raise HTTPException(
@@ -119,7 +112,6 @@ async def upload_document(
             detail=f"Dateiformat {suffix} wird nicht unterstützt. Erlaubt: {settings.documents_supported_formats}",
         )
 
-    # Datei speichern
     upload_dir = Path(settings.documents_temp_upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid.uuid4().hex}{suffix}"
@@ -127,7 +119,6 @@ async def upload_document(
 
     content = await file.read()
 
-    # Prüfe Dateigröße
     if len(content) > settings.documents_max_file_size_mb * 1024 * 1024:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -137,7 +128,6 @@ async def upload_document(
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # Dokument in DB erstellen
     document = Document(
         collection_id=collection_id,
         filename=filename,
@@ -152,7 +142,6 @@ async def upload_document(
     await db.flush()
     await db.refresh(document)
 
-    # Hintergrund-Verarbeitung starten
     background_tasks.add_task(process_document_task, document.id)
 
     return document
@@ -170,7 +159,6 @@ async def delete_document(
     if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dokument nicht gefunden")
 
-    # Datei vom Dateisystem löschen
     file_path = Path(document.file_path)
     if file_path.exists():
         file_path.unlink()

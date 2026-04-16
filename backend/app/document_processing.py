@@ -1,31 +1,43 @@
 """
-Document parsers - extracts text from uploaded files.
+Document Processing - Turns uploaded files into searchable chunks.
+
+This module handles the entire document processing pipeline:
+  1. Parsing files (via docling-serve for rich formats, or locally for plain text)
+  2. Chunking text (using docling-core's HybridChunker for token-aware splits)
+  3. Computing embeddings for each chunk
+  4. Storing chunks + embeddings in the database
 
 Two parsing paths:
-  1. Docling (for rich/structured formats: PDF, DOCX, XLSX, PPTX, HTML, XML, images, MD, CSV)
-     - Conversion runs in docling-serve (separate Docker container with ML models)
-     - Returns the full DoclingDocument JSON (layout, tables, figures, headings)
-     - Chunking runs in-process using docling-core's HybridChunker
-     - HybridChunker splits tables row-by-row (via LineBasedTokenChunker),
-       repeats table headers in each chunk, and never splits a row mid-line
-     - Chunks include heading context (e.g. "Chapter 3 > Section 3.1 > ...")
+  - Docling (for PDF, DOCX, XLSX, PPTX, HTML, XML, images, MD, CSV):
+    Conversion runs in docling-serve (separate Docker container with ML models).
+    Chunking runs in-process using HybridChunker.
+  - Local (for TXT, JSON):
+    File is read as text, converted to a DoclingDocument, then chunked.
 
-  2. Local parsing (for truly plain formats: TXT, JSON)
-     - File is read as text, then converted to a DoclingDocument for chunking
-     - HybridChunker is still used for token-aware, structure-preserving splits
-
-The parse_document() function automatically picks the right parser based on file type.
+The process_document() function is the main entry point - it orchestrates
+the full pipeline from file to searchable chunks in the database.
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.config import settings
+from app.models import Document, Chunk, ChunkEmbedding
+from app.search import embed_batch
 
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# Data types
+# =============================================================================
 
 @dataclass
 class ParsedSection:
@@ -71,7 +83,6 @@ class ParsedDocument:
 
 
 # Formats converted by docling-serve (ML-powered parsing) then chunked in-process.
-# Includes MD and CSV which docling handles natively with structure preservation.
 DOCLING_FORMATS = {
     ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx",
     ".html", ".xml",
@@ -83,16 +94,138 @@ DOCLING_FORMATS = {
 LOCAL_FORMATS = {".txt", ".json"}
 
 
+# =============================================================================
+# Main entry point: full processing pipeline
+# =============================================================================
+
+async def process_document(db: AsyncSession, document_id: int) -> None:
+    """
+    Full document processing pipeline.
+
+    Flow:
+    1. Load document from DB
+    2. Parse file (docling-serve for rich formats, local for text formats)
+    3. Use docling chunks if available, otherwise chunk locally
+    4. Compute embedding for each chunk
+    5. Store chunks + embeddings
+    6. Store document-level metadata (stats, timings)
+    7. Update document status
+    """
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    document = result.scalar_one_or_none()
+    if not document:
+        logger.error(f"Document {document_id} not found")
+        return
+
+    try:
+        # Parse file (runs in a separate thread because file I/O + HTTP calls
+        # to docling-serve are blocking operations that would freeze the async loop)
+        is_docling = document.file_type.lower() in DOCLING_FORMATS
+        pipeline = "docling" if is_docling else "local"
+        logger.info(f"Parsing document: {document.original_name} (pipeline={pipeline})")
+        parsed = await asyncio.to_thread(parse_document, document.file_path, document.file_type)
+
+        # All parsers now return chunks (via HybridChunker).
+        # Fallback to chunk_text only if chunks are empty.
+        if parsed.chunks:
+            chunks = parsed.chunks
+            chunker_type = "docling"
+        else:
+            chunker_type = "local-fallback"
+            logger.warning("No chunks from parser, falling back to text splitter")
+            chunks = await asyncio.to_thread(
+                chunk_text,
+                text=parsed.text,
+                sections=parsed.sections,
+            )
+
+        # Prepare chunks and texts for embedding
+        logger.info(f"Processing {len(chunks)} chunks")
+        chunk_texts = []
+        chunk_objects = []
+
+        for i, chunk_data in enumerate(chunks):
+            # Use contextualized text for embedding if available.
+            # Contextualized text includes the section heading prepended to the chunk,
+            # which helps the embedding model understand what the chunk is about.
+            embed_text_str = chunk_data.contextualized_text or chunk_data.text
+            chunk_texts.append(embed_text_str)
+
+            chunk_meta = {
+                "parser": parsed.metadata.get("parser", pipeline),
+                "chunker": chunker_type,
+            }
+            if chunk_data.contextualized_text:
+                chunk_meta["has_context"] = True
+            if chunk_data.labels:
+                chunk_meta["labels"] = chunk_data.labels
+
+            chunk_obj = Chunk(
+                document_id=document.id,
+                chunk_index=i,
+                content=chunk_data.text,
+                section_header=chunk_data.section_header,
+                page_number=chunk_data.page_number,
+                token_count=chunk_data.token_count,
+                metadata_=chunk_meta,
+            )
+            chunk_objects.append(chunk_obj)
+            db.add(chunk_obj)
+
+        await db.flush()
+
+        # Compute batch embeddings
+        logger.info(f"Computing embeddings for {len(chunk_texts)} chunks")
+        embeddings = await embed_batch(chunk_texts)
+
+        # Store embeddings
+        for chunk_obj, embedding in zip(chunk_objects, embeddings):
+            emb_obj = ChunkEmbedding(
+                chunk_id=chunk_obj.id,
+                model_name=settings.embedding_model,
+                embedding=embedding,
+            )
+            db.add(emb_obj)
+
+        # Store document-level metadata (stats, parse info)
+        doc_meta = dict(parsed.metadata)
+        if parsed.stats:
+            doc_meta["stats"] = {
+                "num_pages": parsed.stats.num_pages,
+                "num_tables": parsed.stats.num_tables,
+                "num_figures": parsed.stats.num_figures,
+                "num_headings": parsed.stats.num_headings,
+                "num_text_elements": parsed.stats.num_text_elements,
+                "num_list_items": parsed.stats.num_list_items,
+                "num_code_blocks": parsed.stats.num_code_blocks,
+            }
+        document.metadata_ = doc_meta
+
+        # Update document status
+        document.processing_status = "completed"
+        document.chunk_count = len(chunk_objects)
+        await db.flush()
+
+        logger.info(
+            f"Document {document.original_name} processed: "
+            f"{len(chunk_objects)} chunks, pipeline={pipeline}"
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing document {document_id}: {e}")
+        document.processing_status = "error"
+        document.processing_error = str(e)
+        await db.flush()
+        raise
+
+
+# =============================================================================
+# Document parsing: route to docling or local parser
+# =============================================================================
+
 def parse_document(file_path: str, file_type: str) -> ParsedDocument:
     """
     Parse a document, routing to docling-serve or local parser as appropriate.
-
-    Args:
-        file_path: Path to the file
-        file_type: File extension (e.g. '.pdf', '.docx')
-
-    Returns:
-        ParsedDocument with extracted text, sections, chunks, and stats.
     """
     ext = file_type.lower()
 
@@ -113,16 +246,7 @@ _RETRY_DELAY = 3.0
 
 
 def _parse_with_docling(file_path: str, file_type: str) -> ParsedDocument:
-    """Convert a document via docling-serve, then chunk in-process.
-
-    1. Sends the file to docling-serve's /v1/convert/file endpoint to get a
-       full DoclingDocument (with layout analysis, table recognition, etc.)
-    2. Chunks the DoclingDocument in-process using HybridChunker
-       (tables are split row-by-row with headers repeated — handled by docling)
-    3. Extracts document statistics from the structured DoclingDocument
-    """
-    from app.core.config import settings
-
+    """Convert a document via docling-serve, then chunk in-process."""
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
@@ -130,15 +254,13 @@ def _parse_with_docling(file_path: str, file_type: str) -> ParsedDocument:
     with open(path, "rb") as f:
         file_bytes = f.read()
 
-    # --- Step 1: Convert via docling-serve ---
-    dl_doc, processing_time = _convert_with_docling_serve(
-        path, file_bytes, settings
-    )
+    # Step 1: Convert via docling-serve
+    dl_doc, processing_time = _convert_with_docling_serve(path, file_bytes)
 
-    # --- Step 2: Export markdown ---
+    # Step 2: Export markdown
     md_text = dl_doc.export_to_markdown()
 
-    # --- Step 3: Chunk with HybridChunker ---
+    # Step 3: Chunk with HybridChunker
     tokenizer_name = settings.docling_tokenizer or "bert-base-uncased"
     chunks = _chunk_docling_document(
         dl_doc,
@@ -147,11 +269,11 @@ def _parse_with_docling(file_path: str, file_type: str) -> ParsedDocument:
         merge_peers=settings.docling_merge_peers,
     )
 
-    # --- Step 4: Build stats from DoclingDocument ---
+    # Step 4: Build stats from DoclingDocument
     stats = _build_stats(dl_doc)
 
     logger.info(
-        f"docling: {path.name} → {len(chunks)} chunks, "
+        f"docling: {path.name} -> {len(chunks)} chunks, "
         f"{stats.num_pages or '?'} pages "
         f"(took {processing_time:.1f}s)"
     )
@@ -174,7 +296,7 @@ def _parse_with_docling(file_path: str, file_type: str) -> ParsedDocument:
     )
 
 
-def _convert_with_docling_serve(path, file_bytes, settings):
+def _convert_with_docling_serve(path, file_bytes):
     """Send file to docling-serve /v1/convert/file and return DoclingDocument."""
     from docling_core.types.doc import DoclingDocument
 
@@ -235,7 +357,6 @@ def _convert_with_docling_serve(path, file_bytes, settings):
     result = response.json()
     processing_time = result.get("processing_time", 0)
 
-    # The convert endpoint returns the DoclingDocument under document.json_content
     doc_data = result.get("document", {})
     json_content = doc_data.get("json_content", {})
     if not json_content:
@@ -257,9 +378,9 @@ def _chunk_docling_document(
     """Chunk a DoclingDocument using HybridChunker.
 
     HybridChunker handles tables natively:
-    - Tables are split row-by-row via LineBasedTokenChunker (no row is split mid-line)
-    - Table headers are repeated in each chunk (repeat_table_header=True)
-    - Table rows are serialized via TripletTableSerializer (one line per row)
+    - Tables are split row-by-row via LineBasedTokenChunker
+    - Table headers are repeated in each chunk
+    - Table rows are serialized via TripletTableSerializer
     """
     from docling_core.transforms.chunker import HybridChunker
     from docling_core.transforms.chunker.tokenizer.huggingface import (
@@ -277,7 +398,6 @@ def _chunk_docling_document(
     )
     raw_chunks = list(chunker.chunk(dl_doc=dl_doc))
 
-    # Convert to ChunkData
     chunks = []
     for chunk in raw_chunks:
         contextualized = chunker.contextualize(chunk)
@@ -315,10 +435,6 @@ def _extract_page_number(chunk) -> int | None:
     return None
 
 
-# =============================================================================
-# Document statistics from DoclingDocument structure
-# =============================================================================
-
 def _build_stats(dl_doc) -> DocumentStats:
     """Extract document statistics from a DoclingDocument."""
     from docling_core.types.doc import DocItemLabel
@@ -343,35 +459,32 @@ def _build_stats(dl_doc) -> DocumentStats:
 
 
 # =============================================================================
-# Local parsers (TXT, JSON — read as text, chunk with HybridChunker)
+# Local parsers (TXT, JSON - read as text, chunk with HybridChunker)
 # =============================================================================
 
 def _parse_locally(file_path: str, file_type: str) -> ParsedDocument:
     """Parse plain text files locally, then chunk with HybridChunker."""
-    from app.core.config import settings
-    from docling_core.types.doc import DoclingDocument, DocItemLabel
+    from docling_core.types.doc import DoclingDocument as DLDoc, DocItemLabel
 
     path = Path(file_path)
     with open(path, encoding="utf-8", errors="replace") as f:
-        text = f.read()
+        text_content = f.read()
 
-    if not text.strip():
+    if not text_content.strip():
         return ParsedDocument(
-            text=text,
+            text=text_content,
             metadata={"parser": "local"},
         )
 
     # Build a DoclingDocument from plain text so HybridChunker can process it
-    dl_doc = DoclingDocument(name=path.stem)
+    dl_doc = DLDoc(name=path.stem)
 
-    # Split on double newlines to preserve paragraph structure
-    paragraphs = text.split("\n\n")
+    paragraphs = text_content.split("\n\n")
     for para in paragraphs:
         para = para.strip()
         if para:
             dl_doc.add_text(label=DocItemLabel.TEXT, text=para)
 
-    # Chunk using HybridChunker (same as docling path)
     tokenizer_name = settings.docling_tokenizer or "bert-base-uncased"
     chunks = _chunk_docling_document(
         dl_doc,
@@ -380,11 +493,71 @@ def _parse_locally(file_path: str, file_type: str) -> ParsedDocument:
         merge_peers=settings.docling_merge_peers,
     )
 
-    logger.info(f"local: {path.name} → {len(chunks)} chunks")
+    logger.info(f"local: {path.name} -> {len(chunks)} chunks")
 
     return ParsedDocument(
-        text=text,
-        sections=[ParsedSection(header=None, content=text)],
+        text=text_content,
+        sections=[ParsedSection(header=None, content=text_content)],
         metadata={"parser": "local", "filename": path.name},
         chunks=chunks,
     )
+
+
+# =============================================================================
+# Fallback chunker (used only if parser returns text without chunks)
+# =============================================================================
+
+def chunk_text(
+    text: str,
+    chunk_size: int = 512,
+    overlap: int = 50,
+    sections: list[ParsedSection] | None = None,
+) -> list[ChunkData]:
+    """
+    Split text into chunks using docling-core's HybridChunker.
+
+    This is a fallback - normally all documents are chunked via the parsing
+    functions above. This only runs if a parser returns raw text without chunks.
+    """
+    from docling_core.types.doc import DoclingDocument as DLDoc, DocItemLabel
+    from docling_core.transforms.chunker import HybridChunker
+    from docling_core.transforms.chunker.tokenizer.huggingface import (
+        HuggingFaceTokenizer,
+    )
+    from transformers import AutoTokenizer
+
+    if not text.strip():
+        return []
+
+    doc = DLDoc(name="local")
+
+    if sections:
+        for section in sections:
+            if section.header:
+                doc.add_heading(text=section.header)
+            if section.content.strip():
+                doc.add_text(label=DocItemLabel.TEXT, text=section.content.strip())
+    else:
+        for para in text.split("\n\n"):
+            para = para.strip()
+            if para:
+                doc.add_text(label=DocItemLabel.TEXT, text=para)
+
+    tokenizer_name = settings.docling_tokenizer or "bert-base-uncased"
+    tok = AutoTokenizer.from_pretrained(tokenizer_name)
+    hf_tok = HuggingFaceTokenizer(tokenizer=tok, max_tokens=settings.docling_max_tokens)
+    chunker = HybridChunker(tokenizer=hf_tok, merge_peers=settings.docling_merge_peers)
+
+    chunks = []
+    for chunk in chunker.chunk(dl_doc=doc):
+        contextualized = chunker.contextualize(chunk)
+        headings = chunk.meta.headings or []
+        section_header = " > ".join(headings) if headings else None
+
+        chunks.append(ChunkData(
+            text=chunk.text,
+            section_header=section_header,
+            contextualized_text=contextualized if contextualized != chunk.text else None,
+        ))
+
+    return chunks

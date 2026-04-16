@@ -4,7 +4,7 @@ Atlas RAG System - FastAPI Entry Point
 This is the main file that starts the web server. It:
   1. Creates the FastAPI application
   2. Runs startup tasks (create DB tables, seed admin user, load settings)
-  3. Registers all API routes (auth, users, groups, collections, documents, chat, etc.)
+  3. Registers all API routes (auth, chat, documents, admin)
   4. Configures CORS (allows the frontend to call the backend API)
 """
 
@@ -16,12 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.core.config import settings
-from app.core.database import engine, Base, async_session
-from app.core.security import hash_password
-from app.api.routes import auth, users, groups, collections, documents, chat, conversations, docker
-from app.api.routes import settings as settings_router
-from app.services.llm_diagnostic import setup_diagnostic_logging
+from app.config import settings
+from app.database import engine, Base, async_session
+from app.auth import hash_password
+from app.models import User, SystemSetting
+from app.llm import setup_diagnostic_logging
+from app.routes import auth, chat, documents, admin
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,6 @@ setup_diagnostic_logging()
 
 async def load_prompt_overrides():
     """Load prompt overrides from the database into the in-memory config."""
-    from app.models.system_setting import SystemSetting
-
     prompt_keys = ["system_prompt", "enrichment_system_prompt", "free_chat_system_prompt"]
     async with async_session() as session:
         for key in prompt_keys:
@@ -47,8 +45,6 @@ async def load_prompt_overrides():
 
 async def seed_admin_user():
     """Create the default admin user if none exists."""
-    from app.models.user import User
-
     async with async_session() as session:
         stmt = (
             pg_insert(User)
@@ -115,14 +111,9 @@ app.add_middleware(
 
 # API routes
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(users.router, prefix="/api/users", tags=["Users"])
-app.include_router(groups.router, prefix="/api/groups", tags=["Groups"])
-app.include_router(collections.router, prefix="/api/collections", tags=["Collections"])
-app.include_router(documents.router, prefix="/api", tags=["Documents"])
 app.include_router(chat.router, prefix="/api", tags=["Chat"])
-app.include_router(conversations.router, prefix="/api", tags=["Conversations"])
-app.include_router(settings_router.router, prefix="/api/settings", tags=["Settings"])
-app.include_router(docker.router, prefix="/api/docker", tags=["Docker"])
+app.include_router(documents.router, prefix="/api", tags=["Documents"])
+app.include_router(admin.router, prefix="/api", tags=["Admin"])
 
 
 @app.get("/api/health")

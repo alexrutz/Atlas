@@ -1,7 +1,11 @@
 """
-LLM Service - Communication with llama-server (the local LLM).
+LLM Service - Everything related to the language model.
 
-This is the interface to the language model. All LLM calls go through here.
+This module handles:
+  1. LLM generation (non-streaming and streaming)
+  2. Prompt building (RAG prompts and document delivery prompts)
+  3. Query enrichment (rephrasing queries with domain terminology)
+  4. Diagnostic logging (colored output for Docker logs)
 
 How it works:
   - llama-server runs locally and exposes an OpenAI-compatible API
@@ -9,33 +13,112 @@ How it works:
   - The LLM generates text based on a system prompt + user prompt
 
 Key concepts:
-  - Thinking mode: The LLM can show its reasoning process ("thinking")
-    before giving the final answer. Uses different sampling parameters
-    (higher temperature for more creative reasoning).
-  - Streaming: Instead of waiting for the full response, we get tokens
-    one at a time via Server-Sent Events (SSE). This lets the frontend
-    show the answer as it's being generated.
-  - Sampling parameters: Control how "creative" vs "focused" the LLM is.
-    Temperature, top_p, top_k etc. affect randomness in token selection.
-
-Functions:
-    generate(prompt, system_prompt, enable_thinking)       - Get full response at once
-    generate_stream(prompt, system_prompt, enable_thinking) - Get response token by token
-    generate_enrichment(prompt, enable_thinking)            - Special call for query enrichment
-    build_rag_prompt(original_q, enriched_q, contexts)     - Build prompt with document context
-    build_document_delivery_prompt(...)                     - Build prompt for "gib mir" requests
+  - Thinking mode: The LLM shows its reasoning process before the final answer.
+    Uses different sampling parameters (higher temperature for more creative reasoning).
+  - Streaming: Tokens arrive one at a time via Server-Sent Events (SSE).
+  - Query enrichment: Before searching, the LLM rephrases the query using
+    domain-specific terminology loaded from the database.
 """
 
 import json
 import logging
+import os
 from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from app.core.config import settings
-from app.services.llm_diagnostic import log_llm_call
+from app.config import settings
+from app.models import Collection, SystemSetting
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Diagnostic logging (colored output for Docker logs)
+# =============================================================================
+
+_diag_logger = logging.getLogger("atlas.llm_diagnostic")
+
+# ANSI colors for terminal output via Docker logs
+CYAN = "\033[96m"
+YELLOW = "\033[93m"
+GREEN = "\033[92m"
+RED = "\033[91m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+
+
+def log_llm_call(
+    label: str,
+    *,
+    system_prompt: str | None = None,
+    user_prompt: str | None = None,
+    enable_thinking: bool | None = None,
+    output: str | None = None,
+    thinking: str | None = None,
+    error: str | None = None,
+    is_stream_start: bool = False,
+) -> None:
+    """
+    Log an LLM call with colored output.
+
+    The `label` determines the header and color:
+      - Labels containing "ENRICHMENT" use cyan
+      - Everything else uses yellow
+    """
+    color = CYAN if "ENRICHMENT" in label else YELLOW
+
+    ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+    parts = [f"{color}{BOLD}{'=' * 80}\n[{ts}] {label}\n{'=' * 80}{RESET}"]
+
+    if system_prompt is not None:
+        parts.append(f"{color}{BOLD}SYSTEM PROMPT:{RESET}")
+        parts.append(f"{color}{system_prompt}{RESET}")
+    if user_prompt is not None:
+        parts.append(f"{color}{BOLD}USER PROMPT:{RESET}")
+        parts.append(f"{color}{user_prompt}{RESET}")
+    if enable_thinking is not None:
+        parts.append(f"{color}{DIM}enable_thinking={enable_thinking}{RESET}")
+
+    if is_stream_start:
+        parts.append(f"{color}{DIM}(streaming started...){RESET}")
+    elif error:
+        parts.append(f"{RED}{BOLD}ERROR:{RESET} {RED}{error}{RESET}")
+    else:
+        if thinking:
+            parts.append(f"{color}{BOLD}THINKING:{RESET}")
+            parts.append(f"{DIM}{thinking}{RESET}")
+        if output is not None:
+            parts.append(f"{GREEN}{BOLD}OUTPUT:{RESET}")
+            parts.append(f"{GREEN}{output}{RESET}")
+
+    parts.append(f"{color}{DIM}{'─' * 80}{RESET}")
+
+    _diag_logger.info("\n".join(parts))
+
+
+def setup_diagnostic_logging(log_path: str = "/app/logs/llm_diagnostic.log") -> None:
+    """Set up the diagnostic logger to write to a dedicated file only.
+
+    The sidecar container (llm-diagnostic) tails this file. We intentionally
+    do NOT add a stderr handler here so that the same diagnostic output does
+    not appear in both ``docker compose logs backend`` and
+    ``docker compose logs llm-diagnostic``.
+    """
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+    diag = logging.getLogger("atlas.llm_diagnostic")
+    diag.setLevel(logging.DEBUG)
+    diag.propagate = False
+
+    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter("%(message)s"))
+    diag.addHandler(fh)
 
 
 # =============================================================================
@@ -227,6 +310,72 @@ async def generate_enrichment(prompt: str, enable_thinking: bool = False) -> str
 
 
 # =============================================================================
+# Query enrichment
+# =============================================================================
+
+async def enrich_query(
+    db: AsyncSession,
+    query: str,
+    collection_ids: list[int],
+    enable_thinking: bool = False,
+) -> str:
+    """
+    Enrich a search query with context information.
+
+    Problem: Users ask questions using everyday language, but documents use
+    specific technical terms. This function asks the LLM to rephrase the query
+    using domain-specific terminology from global + per-collection context.
+
+    If no context is available, returns the original query unchanged.
+    """
+    # 1. Load global context
+    parts = []
+    result = await db.execute(
+        select(SystemSetting.value).where(SystemSetting.key == "global_context")
+    )
+    global_context = result.scalar_one_or_none()
+    if global_context:
+        parts.append("Global context:\n" + global_context)
+
+    # 2. Load per-collection context texts
+    result = await db.execute(
+        select(Collection.name, Collection.context_text)
+        .where(Collection.id.in_(collection_ids))
+    )
+    col_context_lines = [
+        f"- {col.name}: {col.context_text}"
+        for col in result.fetchall()
+        if col.context_text
+    ]
+    if col_context_lines:
+        parts.append("Collection context:\n" + "\n".join(col_context_lines))
+
+    context = "\n\n".join(parts)
+
+    if not context:
+        logger.info("No context available - enriched_query = original_query")
+        return query
+
+    # 3. Ask the LLM to rephrase using domain terminology
+    prompt = settings.enrichment_prompt_template.format(
+        context=context,
+        query=query,
+    )
+
+    try:
+        enriched_query = await generate_enrichment(prompt, enable_thinking=enable_thinking)
+        if enriched_query:
+            logger.info(f"Query enriched: '{query}' -> '{enriched_query}'")
+            return enriched_query
+        else:
+            logger.warning("LLM returned empty response for query enrichment")
+            return query
+    except Exception as e:
+        logger.warning(f"Query enrichment failed, using original query: {e}")
+        return query
+
+
+# =============================================================================
 # Prompt builders
 # =============================================================================
 
@@ -237,8 +386,6 @@ def _format_contexts(contexts: list[dict], include_document_id: bool = False) ->
     Each context becomes:
       [Source 1: document_name.pdf, page 5]
       The actual chunk content here...
-
-    Contexts are separated by "---" dividers.
     """
     parts = []
     for i, ctx in enumerate(contexts, 1):

@@ -8,7 +8,7 @@ How configuration works:
   4. Environment variables in the YAML (like ${DB_PASSWORD}) are automatically resolved
 
 Usage anywhere in the code:
-    from app.core.config import settings
+    from app.config import settings
     print(settings.llm_base_url)      # "http://llama-llm:8080"
     print(settings.db_async_url)      # "postgresql+asyncpg://user:pass@host:5432/db"
     print(settings.llm_temperature)   # 0.7

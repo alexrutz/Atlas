@@ -1,8 +1,10 @@
 """
-Retrieval Service - Finds relevant document chunks for a user's question.
+Search Service - Embedding and retrieval for RAG.
 
-This is the "R" in RAG (Retrieval-Augmented Generation). Given a question,
-it finds the most relevant pieces of text from the uploaded documents.
+This module handles:
+  1. Text embedding (converting text to numerical vectors via llama-embed)
+  2. Vector search (finding similar chunks in PostgreSQL via pgvector)
+  3. Reranking (improving result accuracy with a cross-encoder or keyword fallback)
 
 How the retrieval pipeline works:
   1. The question is converted to an embedding vector (list of numbers)
@@ -15,13 +17,6 @@ What is reranking?
   chunk together with the query and gives a more accurate relevance score.
   It's slower but much better at ranking, so we use it as a second pass
   on the top results from vector search.
-
-  If FlashRank is not available, falls back to a simple keyword overlap score.
-
-Functions:
-    search_chunks(db, query, collection_ids, top_k)  - Full pipeline
-    vector_search(db, query_embedding, collection_ids, top_k) - Raw vector search
-    rerank(query, results) - Rerank results for better accuracy
 """
 
 import functools
@@ -30,13 +25,83 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-from app.core.config import settings
-from app.services.embedding_service import embed_query
+from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Embedding (text -> vector)
+# =============================================================================
+
+async def embed_text(text_input: str) -> list[float]:
+    """
+    Compute the embedding vector for a single text.
+    Returns a list of floats (e.g. 1024 numbers).
+    Retries on failure up to embedding_max_retries times.
+    """
+    async with httpx.AsyncClient(timeout=settings.embedding_timeout) as client:
+        for attempt in range(settings.embedding_max_retries):
+            try:
+                response = await client.post(
+                    f"{settings.embedding_base_url}/v1/embeddings",
+                    json={
+                        "input": text_input,
+                        "model": settings.embedding_model,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["data"][0]["embedding"]
+            except Exception as e:
+                logger.warning(f"Embedding attempt {attempt + 1} failed: {e}")
+                if attempt == settings.embedding_max_retries - 1:
+                    raise
+
+
+async def embed_batch(texts: list[str]) -> list[list[float]]:
+    """
+    Compute embedding vectors for multiple texts in batches.
+
+    Splits the texts into batches of embedding_batch_size and sends each
+    batch to the embedding server. If a batch fails after all retries,
+    falls back to embedding each text individually.
+    """
+    embeddings = []
+    batch_size = settings.embedding_batch_size
+
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        logger.info(f"Embedding batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size}")
+
+        async with httpx.AsyncClient(timeout=settings.embedding_timeout) as client:
+            for attempt in range(settings.embedding_max_retries):
+                try:
+                    response = await client.post(
+                        f"{settings.embedding_base_url}/v1/embeddings",
+                        json={
+                            "input": batch,
+                            "model": settings.embedding_model,
+                        },
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    batch_embeddings = [item["embedding"] for item in data["data"]]
+                    embeddings.extend(batch_embeddings)
+                    break
+                except Exception as e:
+                    logger.warning(f"Batch embedding attempt {attempt + 1} failed: {e}")
+                    if attempt == settings.embedding_max_retries - 1:
+                        # Fallback: embed one text at a time (slower but more reliable)
+                        for single_text in batch:
+                            emb = await embed_text(single_text)
+                            embeddings.append(emb)
+
+    return embeddings
 
 
 # =============================================================================
@@ -67,22 +132,13 @@ async def search_chunks(
     top_k: int | None = None,
 ) -> list[RetrievalResult]:
     """
-    Full retrieval pipeline: embed → vector search → filter → rerank.
+    Full retrieval pipeline: embed -> vector search -> filter -> rerank.
 
     Steps:
       1. Convert the query text into an embedding vector
       2. Find the top_k most similar chunks via pgvector
       3. Remove results below the similarity threshold
       4. Rerank remaining results with a cross-encoder (if enabled)
-
-    Args:
-        db: Database session
-        query: The search query text
-        collection_ids: Which collections to search (already permission-checked)
-        top_k: How many results to retrieve (default from config)
-
-    Returns:
-        List of RetrievalResult, sorted by relevance (best first)
     """
     top_k = top_k or settings.retrieval_top_k
 
@@ -91,7 +147,7 @@ async def search_chunks(
 
     # Step 1: Convert query to embedding vector
     logger.info(f"Retrieval: query='{query[:100]}', collections={collection_ids}, top_k={top_k}")
-    query_embedding = await embed_query(query)
+    query_embedding = await embed_text(query)
 
     # Step 2: Vector similarity search
     results = await vector_search(db, query_embedding, collection_ids, top_k)
@@ -217,16 +273,14 @@ def _rerank_with_cross_encoder(ranker, query: str, results: list[RetrievalResult
     """
     from flashrank import RerankRequest
 
-    # FlashRank expects a list of {"id": ..., "text": ...} dicts
     passages = [{"id": idx, "text": r.content} for idx, r in enumerate(results)]
     ranked = ranker.rerank(RerankRequest(query=query, passages=passages))
 
-    # Map the ranked results back to our RetrievalResult objects
     idx_to_result = {idx: r for idx, r in enumerate(results)}
     reranked = []
     for item in ranked:
         r = idx_to_result[item["id"]]
-        r.similarity_score = float(item["score"])  # Replace with cross-encoder score
+        r.similarity_score = float(item["score"])
         reranked.append(r)
 
     return reranked
@@ -238,8 +292,6 @@ def _rerank_with_keywords(query: str, results: list[RetrievalResult]) -> list[Re
 
     For each result, computes a combined score:
       combined = 0.7 * vector_similarity + 0.3 * keyword_overlap
-
-    Keyword overlap measures how many words from the query appear in the chunk.
     """
     query_words = _tokenize(query)
 
@@ -250,14 +302,9 @@ def _rerank_with_keywords(query: str, results: list[RetrievalResult]) -> list[Re
         combined = 0.7 * r.similarity_score + 0.3 * keyword_score
         scored_results.append((combined, r))
 
-    # Sort by combined score (highest first)
     scored_results.sort(key=lambda x: x[0], reverse=True)
     return [r for _, r in scored_results]
 
-
-# =============================================================================
-# Keyword scoring helpers
-# =============================================================================
 
 # Splits text into words (removes punctuation, keeps only words with 2+ chars)
 _WORD_SPLIT = re.compile(r"[^\w]+", re.UNICODE)
@@ -286,10 +333,8 @@ def _keyword_overlap(query_words: list[str], chunk_words: list[str]) -> float:
     if not shared:
         return 0.0
 
-    # Jaccard similarity: shared / total unique words
     jaccard = len(shared) / len(query_set | chunk_set)
 
-    # Term frequency: count how often query words appear in chunk (cap at 3 per word)
     chunk_counts = Counter(chunk_words)
     tf_hits = sum(min(chunk_counts[w], 3) for w in query_words if w in chunk_counts)
     tf_score = tf_hits / (len(query_words) * 3)
