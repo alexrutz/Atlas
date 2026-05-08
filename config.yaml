@@ -32,7 +32,7 @@ database:
 # pgvector Configuration
 # -----------------------------------------------------------------------------
 vector:
-  dimensions: 1024
+  dimensions: 2560
   index_type: "hnsw"
   distance_metric: "cosine"
   ivfflat_lists: 100
@@ -77,13 +77,13 @@ llm:
     Answer in the same language the user asks in.
 
 # -----------------------------------------------------------------------------
-# Embedding Configuration (llama-server, CPU)
-# Model: perplexity-ai/pplx-embed-context-v1-0.6b (1024-dim)
+# Embedding Configuration (llama-server, CUDA GPU)
+# Model: Qwen/Qwen3-Embedding-4B-GGUF Q6_K (2560-dim)
 # -----------------------------------------------------------------------------
 embedding:
   base_url: "http://llama-embed:8081"
   model: "embed"
-  batch_size: 550
+  batch_size: 32
   max_retries: 3
   timeout: 60
 
@@ -99,16 +99,20 @@ docling:
   base_url: "http://docling-serve:5001"
   max_tokens: 512                 # Token limit per chunk for HybridChunker (matches embedding ctx-size)
   merge_peers: true              # Merge undersized adjacent chunks with same headings
-  tokenizer: "perplexity-ai/pplx-embed-v1-0.6b"  # HuggingFace tokenizer
+  tokenizer: "Qwen/Qwen3-Embedding-4B"  # HuggingFace tokenizer (matches embedding model)
 
 # -----------------------------------------------------------------------------
 # Retrieval Configuration
 # -----------------------------------------------------------------------------
+# Reranker: Qwen/Qwen3-Reranker-4B served via llama-server in --reranking mode.
+# Endpoint: POST {rerank_base_url}/v1/rerank with {query, documents}.
 retrieval:
   top_k: 10
   rerank: true
-  rerank_model: "ms-marco-MiniLM-L-12-v2"
+  rerank_base_url: "http://llama-rerank:8082"
+  rerank_model: "rerank"
   rerank_top_k: 5
+  rerank_timeout: 60
   similarity_threshold: 0.3
   query_enrichment:
     enabled: true

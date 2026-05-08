@@ -37,8 +37,9 @@ Nginx Reverse Proxy
 FastAPI Backend (port 8000)
     │
     ├── PostgreSQL 16 + pgvector (port 5432)
-    ├── llama-server LLM (port 8080) — Qwen3.5-35B-A3B GGUF, 65K context, GPU
-    ├── llama-server Embedding (port 8081) — pplx-embed-context-v1-0.6b, 1024-dim, CPU
+    ├── llama-server LLM (port 8080) — Qwen3.6-35B-A3B GGUF (Q5_K_XL), 65K context, GPU
+    ├── llama-server Embedding (port 8081) — Qwen3-Embedding-4B GGUF (Q6_K), 2560-dim, GPU
+    ├── llama-server Reranker (port 8082) — Qwen3-Reranker-4B GGUF (Q6_K), GPU
     ├── Docling Serve (port 5001) — ML document parsing & chunking (official image)
     └── Docker Socket (container management)
 
@@ -75,9 +76,14 @@ openssl rand -hex 32
 | `AUTH_SECRET_KEY` | `change_me_in_production...` | JWT secret key |
 | `ADMIN_DEFAULT_PASSWORD` | `admin` | Initial admin password |
 | `HF_TOKEN` | _(empty)_ | Hugging Face token (required for gated models) |
+| `LLM_MODEL_FILE` | `Qwen3.6-35B-A3B-UD-Q5_K_XL.gguf` | LLM GGUF filename in `../models/` |
 | `LLM_N_GPU_LAYERS` | `-1` | GPU layers for LLM (`-1` = all layers on GPU) |
-| `LLM_CTX_SIZE` | `65536` | LLM context window size in tokens |
-| `EMBED_CTX_SIZE` | `512` | Embedding model context size |
+| `LLM_CTX_SIZE` | `32768` | LLM context window size in tokens |
+| `EMBED_MODEL_FILE` | `Qwen3-Embedding-4B-Q6_K.gguf` | Embedding GGUF filename |
+| `EMBED_CTX_SIZE` | `1024` | Embedding model context size |
+| `EMBED_BATCH_SIZE` | `1024` | Embedding batch / ubatch size |
+| `RERANK_MODEL_FILE` | `Qwen3-Reranker-4B-Q6_K.gguf` | Reranker GGUF filename |
+| `RERANK_CTX_SIZE` | `4096` | Reranker context size |
 | `DOCLING_DO_OCR` | `true` | Enable OCR for scanned documents and images |
 | `DOCLING_OCR_BACKEND` | `auto` | OCR backend: `auto` (best available), `easyocr`, or `tesseract` |
 | `DOCLING_OCR_LANG` | _(empty)_ | Comma-separated OCR language codes, e.g. `de,en` (empty = auto-detect) |
@@ -91,9 +97,10 @@ openssl rand -hex 32
 
 | Service | Container | Port | Description |
 |---|---|---|---|
-| PostgreSQL + pgvector | `atlas-postgres` | 5432 | Vector database with 1024-dim embeddings |
+| PostgreSQL + pgvector | `atlas-postgres` | 5432 | Vector database with 2560-dim embeddings |
 | llama-server LLM | `atlas-llama-llm` | 8080 | Chat completion API (65K context, CUDA GPU) |
-| llama-server Embedding | `atlas-llama-embed` | 8081 | Embedding API (1024-dim, CPU) |
+| llama-server Embedding | `atlas-llama-embed` | 8081 | Embedding API (2560-dim, CUDA GPU) |
+| llama-server Reranker | `atlas-llama-rerank` | 8082 | Reranking API (`/v1/rerank`, CUDA GPU) |
 | Docling Serve | `atlas-docling-serve` | 5001 | ML document parsing & chunking (official image) |
 | FastAPI Backend | `atlas-backend` | 8000 | API server |
 | React Frontend + Nginx | `atlas-frontend` | 3000 | Web UI |
@@ -115,9 +122,11 @@ All settings live in `config.yaml` (single source of truth). Changes require a b
 
 ### LLM & Models
 
-- **LLM**: `unsloth/Qwen3.5-35B-A3B-GGUF` (`Qwen3.5-35B-A3B-UD-IQ3_S.gguf`) — downloaded automatically on first start
-- **Embedding**: `pplx-embed-context-v1-0.6b-q8_0.gguf` (perplexity-ai/pplx-embed-context-v1-0.6b) — must be placed in `../models/` before starting
-- **Reranker**: `ms-marco-MiniLM-L-12-v2` cross-encoder (ONNX, runs in the backend)
+- **LLM**: [`unsloth/Qwen3.6-35B-A3B-GGUF`](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF) (`Qwen3.6-35B-A3B-UD-Q5_K_XL.gguf`, ~26.6 GB)
+- **Embedding**: [`Qwen/Qwen3-Embedding-4B-GGUF`](https://huggingface.co/Qwen/Qwen3-Embedding-4B-GGUF) (`Qwen3-Embedding-4B-Q6_K.gguf`, ~3.31 GB, 2560-dim)
+- **Reranker**: [`Voodisss/Qwen3-Reranker-4B-GGUF-llama_cpp`](https://huggingface.co/Voodisss/Qwen3-Reranker-4B-GGUF-llama_cpp) (community GGUF of `Qwen/Qwen3-Reranker-4B`, served via llama.cpp `--reranking` mode)
+
+Run `scripts/pull-models.sh` to download all three into `../models/`.
 
 ### LLM Sampling Parameters
 
@@ -154,7 +163,7 @@ Documents are processed through two pipelines depending on format:
 
 1. **Query Enrichment** (toggleable): The LLM rephrases the user query using global + collection context to include domain-specific terms
 2. **Hybrid Retrieval**: Vector similarity + full-text search across selected collections
-3. **Cross-Encoder Reranking**: Top results reranked by `ms-marco-MiniLM-L-12-v2` before the final LLM call
+3. **Reranking**: Top results reranked by `Qwen3-Reranker-4B` (llama-server `--reranking` mode) before the final LLM call
 4. **Dual-Query Answering**: The final LLM receives both the original question and enriched query, answering in the user's terminology while leveraging enriched search terms
 
 ### Chat Controls

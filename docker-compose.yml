@@ -32,10 +32,10 @@ services:
 
   # ---------------------------------------------------------------------------
   # llama-server - LLM Server (OpenAI-compatible API, CUDA GPU)
-  # Downloads the model directly from Hugging Face on first start.
+  # Model: unsloth/Qwen3.6-35B-A3B-GGUF (Q5_K_XL, ~26.6 GB)
   # --jinja enables Jinja2 chat templates so thinking can be controlled
   # at runtime via the model's built-in template (enable_thinking parameter).
-  # --reasoning-format deepseek outputs thinking in reasoning_content field.
+  # --reasoning-format auto detects the model's thinking tag style.
   # --reasoning-budget controls max thinking tokens (-1 = unlimited).
   # ---------------------------------------------------------------------------
   llama-llm:
@@ -51,7 +51,7 @@ services:
     volumes:
       - ../models:/models
     command: >
-      -m /models/gemma-4-26B-A4B-it-UD-Q3_K_M.gguf
+      -m /models/${LLM_MODEL_FILE:-Qwen3.6-35B-A3B-UD-Q5_K_XL.gguf}
       --port 8080
       --host 0.0.0.0
       --n-gpu-layers ${LLM_N_GPU_LAYERS:--1}
@@ -79,11 +79,9 @@ services:
       - atlas-network
 
   # ---------------------------------------------------------------------------
-  # llama-embed - Embedding Server (OpenAI-compatible API, CPU)
-  # Serves mixedbread-ai/mxbai-embed-large-v1 (1024-dim embeddings).
+  # llama-embed - Embedding Server (OpenAI-compatible API, CUDA GPU)
+  # Model: Qwen/Qwen3-Embedding-4B-GGUF (Q6_K, ~3.31 GB, 2560-dim output)
   # OpenAI-compatible /v1/embeddings endpoint on port 8081.
-  # Model is downloaded from Hugging Face on first start; cached in embed_model_cache.
-  # Runs on CPU (--n-gpu-layers 0) so the LLM keeps full VRAM.
   # ---------------------------------------------------------------------------
   llama-embed:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -95,14 +93,14 @@ services:
     volumes:
       - ../models:/models
     command: >
-      -m /models/pplx-embed-v1-0.6B-Q4_K_M.gguf
+      -m /models/${EMBED_MODEL_FILE:-Qwen3-Embedding-4B-Q6_K.gguf}
       --port 8081
       --host 0.0.0.0
       --n-gpu-layers -1
-      --ctx-size ${EMBED_CTX_SIZE:-512}
+      --ctx-size ${EMBED_CTX_SIZE:-1024}
       --parallel 1
-      --batch-size 550
-      --ubatch-size 550
+      --batch-size ${EMBED_BATCH_SIZE:-1024}
+      --ubatch-size ${EMBED_BATCH_SIZE:-1024}
       --alias embed
       --embedding
     deploy:
@@ -118,6 +116,46 @@ services:
       timeout: 10s
       retries: 10
       start_period: 300s
+    networks:
+      - atlas-network
+
+  # ---------------------------------------------------------------------------
+  # llama-rerank - Reranker Server (llama.cpp --reranking mode, CUDA GPU)
+  # Model: Voodisss/Qwen3-Reranker-4B-GGUF-llama_cpp (Q6_K, ~3.31 GB)
+  # GGUF prepared by the community for llama.cpp's --reranking flag.
+  # Endpoint: POST /v1/rerank  body: {"query": "...", "documents": ["..."]}
+  # ---------------------------------------------------------------------------
+  llama-rerank:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: atlas-llama-rerank
+    restart: unless-stopped
+    user: root
+    ports:
+      - "8082:8082"
+    volumes:
+      - ../models:/models
+    command: >
+      -m /models/${RERANK_MODEL_FILE:-Qwen3-Reranker-4B-Q6_K.gguf}
+      --port 8082
+      --host 0.0.0.0
+      --n-gpu-layers -1
+      --ctx-size ${RERANK_CTX_SIZE:-4096}
+      --parallel 1
+      --alias rerank
+      --reranking
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
     networks:
       - atlas-network
 
@@ -196,6 +234,8 @@ services:
       llama-llm:
         condition: service_healthy
       llama-embed:
+        condition: service_healthy
+      llama-rerank:
         condition: service_healthy
       docling-serve:
         condition: service_healthy

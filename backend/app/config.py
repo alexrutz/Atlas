@@ -139,8 +139,10 @@ class Settings:
         ret = config.get("retrieval", {})
         self.retrieval_top_k: int = ret.get("top_k", 10)
         self.retrieval_rerank: bool = ret.get("rerank", True)
-        self.retrieval_rerank_model: str = ret.get("rerank_model", "ms-marco-MiniLM-L-12-v2")
+        self.retrieval_rerank_base_url: str = ret.get("rerank_base_url", "http://llama-rerank:8082")
+        self.retrieval_rerank_model: str = ret.get("rerank_model", "rerank")
         self.retrieval_rerank_top_k: int = ret.get("rerank_top_k", 5)
+        self.retrieval_rerank_timeout: int = ret.get("rerank_timeout", 60)
         self.retrieval_similarity_threshold: float = ret.get("similarity_threshold", 0.3)
 
         # Query enrichment

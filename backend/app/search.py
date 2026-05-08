@@ -4,22 +4,20 @@ Search Service - Embedding and retrieval for RAG.
 This module handles:
   1. Text embedding (converting text to numerical vectors via llama-embed)
   2. Vector search (finding similar chunks in PostgreSQL via pgvector)
-  3. Reranking (improving result accuracy with a cross-encoder or keyword fallback)
+  3. Reranking (Qwen3-Reranker-4B via llama-server, with keyword fallback)
 
 How the retrieval pipeline works:
   1. The question is converted to an embedding vector (list of numbers)
   2. pgvector finds chunks with similar embedding vectors (cosine similarity)
   3. Low-similarity results are filtered out (below threshold)
-  4. A cross-encoder (FlashRank) reranks the results for better accuracy
+  4. A reranker scores (query, chunk) pairs for more accurate ordering
 
-What is reranking?
-  Vector search is fast but approximate. The cross-encoder reads each
-  chunk together with the query and gives a more accurate relevance score.
-  It's slower but much better at ranking, so we use it as a second pass
-  on the top results from vector search.
+Reranking is provided by Qwen/Qwen3-Reranker-4B served via llama.cpp's
+--reranking mode (HTTP endpoint /v1/rerank). The endpoint sees both the
+query and each chunk together, so its scores are more accurate than the
+vector similarity used for the initial recall step.
 """
 
-import functools
 import logging
 import re
 from collections import Counter
@@ -171,7 +169,7 @@ async def search_chunks(
 
     # Step 4: Rerank for better accuracy (only if we have more results than rerank_top_k)
     if settings.retrieval_rerank and len(results) > settings.retrieval_rerank_top_k:
-        results = rerank(query, results)
+        results = await rerank(query, results)
         results = results[:settings.retrieval_rerank_top_k]
 
     return results
@@ -229,60 +227,58 @@ async def vector_search(
 
 
 # =============================================================================
-# Reranking (cross-encoder or keyword fallback)
+# Reranking (Qwen3-Reranker via llama-server, keyword fallback)
 # =============================================================================
 
-@functools.cache
-def _get_ranker():
-    """Load the FlashRank cross-encoder model (only on first call, cached thereafter)."""
-    try:
-        from flashrank import Ranker
-        model = settings.retrieval_rerank_model
-        logger.info(f"Loading FlashRank cross-encoder: {model}")
-        ranker = Ranker(model_name=model, cache_dir="/tmp/flashrank")
-        logger.info("FlashRank cross-encoder loaded successfully")
-        return ranker
-    except Exception as exc:
-        logger.warning(f"FlashRank not available ({exc}), will use keyword fallback")
-        return None
-
-
-def rerank(query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:
+async def rerank(query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:
     """
     Rerank results for better accuracy.
 
-    Tries the FlashRank cross-encoder first. If FlashRank is not installed
-    or fails to load, falls back to keyword-based reranking.
+    Calls Qwen3-Reranker-4B via llama.cpp's /v1/rerank endpoint. If the
+    reranker server is unreachable, falls back to keyword-based reranking.
     """
     if not results:
         return results
 
-    ranker = _get_ranker()
-    if ranker is not None:
-        return _rerank_with_cross_encoder(ranker, query, results)
-    return _rerank_with_keywords(query, results)
+    try:
+        return await _rerank_with_llama_server(query, results)
+    except Exception as exc:
+        logger.warning(f"Reranker server unavailable ({exc}), using keyword fallback")
+        return _rerank_with_keywords(query, results)
 
 
-def _rerank_with_cross_encoder(ranker, query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:
+async def _rerank_with_llama_server(query: str, results: list[RetrievalResult]) -> list[RetrievalResult]:
     """
-    Rerank using the FlashRank cross-encoder.
+    Rerank using llama-server's /v1/rerank endpoint (Qwen3-Reranker-4B).
 
-    The cross-encoder reads the query + each chunk together and gives a
-    relevance score. This is more accurate than vector similarity because
-    it sees both texts at the same time.
+    Body: {"model": "rerank", "query": str, "documents": [str, ...]}
+    Response: {"results": [{"index": int, "relevance_score": float}, ...]}
     """
-    from flashrank import RerankRequest
+    documents = [r.content for r in results]
+    url = f"{settings.retrieval_rerank_base_url}/v1/rerank"
 
-    passages = [{"id": idx, "text": r.content} for idx, r in enumerate(results)]
-    ranked = ranker.rerank(RerankRequest(query=query, passages=passages))
+    async with httpx.AsyncClient(timeout=settings.retrieval_rerank_timeout) as client:
+        response = await client.post(
+            url,
+            json={
+                "model": settings.retrieval_rerank_model,
+                "query": query,
+                "documents": documents,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
 
-    idx_to_result = {idx: r for idx, r in enumerate(results)}
-    reranked = []
-    for item in ranked:
-        r = idx_to_result[item["id"]]
-        r.similarity_score = float(item["score"])
+    items = data.get("results", [])
+    reranked: list[RetrievalResult] = []
+    for item in items:
+        idx = item["index"]
+        score = float(item.get("relevance_score", item.get("score", 0.0)))
+        r = results[idx]
+        r.similarity_score = score
         reranked.append(r)
 
+    reranked.sort(key=lambda r: r.similarity_score, reverse=True)
     return reranked
 
 
