@@ -24,7 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC
 
 from app.database import Base
 from app.config import settings
@@ -177,7 +177,7 @@ class ChunkEmbedding(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     chunk_id: Mapped[int] = mapped_column(Integer, ForeignKey("chunks.id", ondelete="CASCADE"), nullable=False)
     model_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    embedding = mapped_column(Vector(settings.vector_dimensions), nullable=True)
+    embedding = mapped_column(HALFVEC(settings.vector_dimensions), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     chunk = relationship("Chunk", back_populates="embeddings")

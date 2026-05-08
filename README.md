@@ -97,7 +97,7 @@ openssl rand -hex 32
 
 | Service | Container | Port | Description |
 |---|---|---|---|
-| PostgreSQL + pgvector | `atlas-postgres` | 5432 | Vector database with 2560-dim embeddings |
+| PostgreSQL + pgvector | `atlas-postgres` | 5432 | Vector database with 2560-dim embeddings (`halfvec`, HNSW) |
 | llama-server LLM | `atlas-llama-llm` | 8080 | Chat completion API (65K context, CUDA GPU) |
 | llama-server Embedding | `atlas-llama-embed` | 8081 | Embedding API (2560-dim, CUDA GPU) |
 | llama-server Reranker | `atlas-llama-rerank` | 8082 | Reranking API (`/v1/rerank`, CUDA GPU) |

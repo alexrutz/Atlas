@@ -110,13 +110,13 @@ CREATE TABLE chunk_embeddings (
     id          SERIAL PRIMARY KEY,
     chunk_id    INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
     model_name  VARCHAR(200) NOT NULL,
-    embedding   vector(2560),
+    embedding   halfvec(2560),
     created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(chunk_id, model_name)
 );
 
 CREATE INDEX idx_chunk_embeddings_vector ON chunk_embeddings
-    USING hnsw (embedding vector_cosine_ops)
+    USING hnsw (embedding halfvec_cosine_ops)
     WITH (m = 16, ef_construction = 64);
 
 CREATE INDEX idx_chunk_embeddings_chunk ON chunk_embeddings(chunk_id);

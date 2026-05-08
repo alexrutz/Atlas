@@ -3,6 +3,10 @@
 # =============================================================================
 # Starts all required services for the Atlas RAG system.
 # Usage: docker compose up -d
+#
+# Services start strictly sequentially via depends_on + service_healthy chain
+# (postgres -> llama-llm -> llama-embed -> llama-rerank -> docling-serve ->
+# backend -> frontend / llm-diagnostic) so startup logs do not interleave.
 # =============================================================================
 
 services:
@@ -71,6 +75,9 @@ services:
       timeout: 10s
       retries: 10
       start_period: 180s
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - atlas-network
 
@@ -111,6 +118,9 @@ services:
       timeout: 10s
       retries: 10
       start_period: 300s
+    depends_on:
+      llama-llm:
+        condition: service_healthy
     networks:
       - atlas-network
 
@@ -150,6 +160,9 @@ services:
       timeout: 10s
       retries: 10
       start_period: 180s
+    depends_on:
+      llama-embed:
+        condition: service_healthy
     networks:
       - atlas-network
 
@@ -192,6 +205,9 @@ services:
       timeout: 10s
       retries: 10
       start_period: 180s
+    depends_on:
+      llama-rerank:
+        condition: service_healthy
     networks:
       - atlas-network
 
@@ -223,16 +239,14 @@ services:
       - ./logs:/app/logs
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      postgres:
-        condition: service_healthy
-      llama-llm:
-        condition: service_healthy
-      llama-embed:
-        condition: service_healthy
-      llama-rerank:
-        condition: service_healthy
       docling-serve:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - atlas-network
 
@@ -253,7 +267,8 @@ services:
     volumes:
       - ./logs:/logs:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - atlas-network
 
@@ -269,7 +284,8 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - atlas-network
 
